@@ -1,0 +1,23 @@
+\documentclass[{{paper}},openany]{{{documentClass}}}
+\usepackage{fontspec,microtype,graphicx,booktabs,longtable,tabularx,hyperref,bookmark,cleveref}
+\usepackage[margin={{margin}}]{geometry}
+\usepackage{polyglossia}\setdefaultlanguage{{{language}}}
+\usepackage{amsmath,amssymb,mathtools,amsthm}
+\newtheorem{theorem}{Theorem}[section]\newtheorem{lemma}[theorem]{Lemma}\newtheorem{proposition}[theorem]{Proposition}\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}\newtheorem{definition}[theorem]{Definition}\theoremstyle{remark}\newtheorem*{remark}{Remark}
+\usepackage[normalem]{ulem}\usepackage{soul,xcolor,caption,subcaption,enumitem,csquotes,imakeidx}
+\newenvironment{carvecode}{\par\smallskip\begingroup\ttfamily\small\raggedright\setlength{\parindent}{0pt}}{\par\endgroup\smallskip}
+\newcommand{\carvecodelabel}[1]{\par\smallskip\noindent\colorbox{black!8}{\scriptsize\sffamily #1}\par\nobreak}
+{{indexSetup}}
+{{glossarySetup}}
+{{bibliographySetup}}
+\title{ {{title}} }\author{ {{author}} }\date{ {{date}} }
+\begin{document}\frontmatter
+{{titleBlock}}
+{{toc}}
+\mainmatter
+{{body}}
+{{bibliographyPrint}}
+{{glossaryPrint}}
+{{indexPrint}}
+\end{document}

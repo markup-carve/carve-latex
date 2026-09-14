@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://markup-carve.github.io/carve-latex/publishing-report.schema.json",
+  "title": "Carve LaTeX publishing report",
+  "type": "object",
+  "required": ["schemaVersion", "sourceFormat", "targetFormat", "diagnostics"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "sourceFormat": { "const": "carve-ast" },
+    "targetFormat": { "const": "latex" },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message", "severity", "fidelity", "confidence"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["info", "warning", "error"] },
+          "fidelity": { "enum": ["preserved", "normalized", "degraded", "dropped"] },
+          "confidence": { "enum": ["exact", "inferred", "fallback"] },
+          "path": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

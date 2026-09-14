@@ -1,0 +1,30 @@
+---yaml
+title: Reproducible Carve Publishing
+author: Ada Example
+date: 2026-09-14
+lang: en
+bibliography: [references.bib]
+tableOfContents: true
+---
+
+# Introduction
+
+Carve keeps the authoring source readable while `carve-latex` owns publication typography.
+
+## A theorem
+
+::: theorem
+Every supported structural node is translated from the canonical AST rather than reparsed from HTML.
+:::
+
+## Data
+
+| Measure | Result |
+|---------|-------:|
+| Fidelity | 100 |
+
+```rust
+fn main() {
+    println!("Carve");
+}
+```
