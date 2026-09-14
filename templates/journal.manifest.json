@@ -1,0 +1,1 @@
+{ "name": "journal", "template": "journal.tex", "requiredMetadata": ["title", "author"], "documentClass": "article" }

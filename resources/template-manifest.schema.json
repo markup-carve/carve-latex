@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Carve LaTeX template manifest",
+  "type": "object",
+  "required": ["name", "template", "requiredMetadata"],
+  "properties": {
+    "name": { "type": "string" },
+    "template": { "type": "string" },
+    "requiredMetadata": { "type": "array", "items": { "type": "string" } },
+    "documentClass": { "enum": ["article", "report", "book", "thesis"] }
+  },
+  "additionalProperties": false
+}

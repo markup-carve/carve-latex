@@ -20,14 +20,19 @@ export function metadataOptions(metadata: Record<string, unknown>): PublishOptio
     return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : undefined;
   };
   const options: PublishOptions = {};
-  const assign = (key: 'title' | 'author' | 'date' | 'lang' | 'margin' | 'citeStyle', value: string | undefined) => {
+  const assign = (key: 'title' | 'author' | 'date' | 'lang' | 'margin' | 'citeStyle' | 'abstract' | 'acknowledgements' | 'dedication', value: string | undefined) => {
     if (value !== undefined) options[key] = value;
   };
   assign('title', strings('title')); assign('author', strings('author')); assign('date', strings('date'));
   assign('lang', strings('lang')); assign('margin', strings('margin')); assign('citeStyle', strings('citationStyle'));
+  assign('abstract', strings('abstract')); assign('acknowledgements', strings('acknowledgements')); assign('dedication', strings('dedication'));
   const bibliography = list('bibliography'); if (bibliography) options.bibliography = bibliography;
+  const indexes = list('indexes'); if (indexes) options.indexes = indexes;
+  const keywords = list('keywords'); if (keywords) options.keywords = keywords;
   if (metadata.tableOfContents === true) options.tableOfContents = true;
   if (metadata.index === true) options.index = true;
   if (metadata.glossaries === true) options.glossaries = true;
+  if (metadata.listOfFigures === true) options.listOfFigures = true;
+  if (metadata.listOfTables === true) options.listOfTables = true;
   return options;
 }

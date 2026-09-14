@@ -1,0 +1,1 @@
+{ "name": "thesis", "template": "thesis.tex", "requiredMetadata": ["title", "author"], "documentClass": "thesis" }
