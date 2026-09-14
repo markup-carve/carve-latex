@@ -143,15 +143,4 @@ Raw LaTeX is inert by default. `--allow-raw-latex` is a trust decision; never en
 
 ## Development
 
-```bash
-npm ci
-npm run check
-npm test
-npm pack --dry-run
-```
-
-CI tests Node.js 20, 22 and 24 and performs a real LuaLaTeX PDF smoke build.
-
-## License
-
-MIT
+Contributor setup, testing, and maintenance notes are in the [development guide](docs/development.md).
