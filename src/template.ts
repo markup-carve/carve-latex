@@ -7,7 +7,7 @@ export const DEFAULT_TEMPLATE = String.raw`\documentclass[{{paper}}]{{{documentC
 \usepackage{microtype}
 \usepackage[margin={{margin}}]{geometry}
 \usepackage{polyglossia}
-\setdefaultlanguage{ {{language}} }
+\setdefaultlanguage{{{language}}}
 \usepackage{hyperref}
 \usepackage{bookmark}
 \usepackage{graphicx}

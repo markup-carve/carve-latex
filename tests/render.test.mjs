@@ -17,6 +17,7 @@ test('renders a complete publication document', () => {
   ] });
   assert.match(result.value, /\\documentclass\[a4paper\]\{article\}/);
   assert.match(result.value, /\\title\{ A Study \}/);
+  assert.match(result.value, /\\setdefaultlanguage\{english\}/);
   assert.match(result.value, /\\tableofcontents/);
   assert.match(result.value, /\\section\{Introduction\}\\label\{intro\}/);
   assert.match(result.value, /\\emph\{structure\}/);
