@@ -1,0 +1,57 @@
+{
+  "name": "@markup-carve/carve-latex",
+  "version": "0.1.0",
+  "description": "Publication-grade Carve to LaTeX and PDF publishing",
+  "type": "module",
+  "bin": {
+    "carve-latex": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "templates",
+    "resources"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markup-carve/carve-latex.git"
+  },
+  "homepage": "https://markup-carve.github.io/carve/",
+  "bugs": {
+    "url": "https://github.com/markup-carve/carve-latex/issues"
+  },
+  "keywords": [
+    "carve",
+    "latex",
+    "lualatex",
+    "pdf",
+    "publishing"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@markup-carve/carve": "^0.1.6",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "ajv": "^8.20.0",
+    "typescript": "^7.0.2"
+  }
+}
