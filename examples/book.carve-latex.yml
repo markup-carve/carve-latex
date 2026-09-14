@@ -1,0 +1,9 @@
+version: 1
+chapters:
+  - paper.crv
+output: book.pdf
+publish:
+  documentClass: book
+  tableOfContents: true
+  bibliography:
+    - references.bib

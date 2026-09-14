@@ -1,0 +1,12 @@
+{{documentMetadata}}
+\documentclass[{{paper}},11pt]{report}
+\usepackage{fontspec,microtype,graphicx,booktabs,longtable,tabularx,multirow,pdflscape,hyperref,bookmark,cleveref}
+\usepackage[margin={{margin}}]{geometry}\usepackage{polyglossia}\setdefaultlanguage{{{language}}}
+\usepackage{amsmath,amssymb,mathtools,amsthm}\usepackage[normalem]{ulem}\usepackage{soul,xcolor,caption,subcaption,enumitem,csquotes,imakeidx}
+\newtheorem{theorem}{Theorem}[chapter]\newtheorem{lemma}[theorem]{Lemma}\newtheorem{definition}[theorem]{Definition}
+\newenvironment{carvecode}{\par\smallskip\begingroup\ttfamily\small\raggedright\setlength{\parindent}{0pt}}{\par\endgroup\smallskip}
+\newcommand{\carvecodelabel}[1]{\par\smallskip\noindent\colorbox{black!8}{\scriptsize\sffamily #1}\par\nobreak}
+\definecolor{carvekeyword}{RGB}{116,72,164}\definecolor{carvestring}{RGB}{38,127,72}\definecolor{carvenumber}{RGB}{153,85,32}\definecolor{carvecomment}{RGB}{100,106,115}
+{{indexSetup}}{{glossarySetup}}{{bibliographySetup}}
+\title{ {{title}} }\author{ {{author}} }\date{ {{date}} }
+\begin{document}{{titleBlock}}{{frontMatter}}{{toc}}{{body}}{{bibliographyPrint}}{{glossaryPrint}}{{indexPrint}}\end{document}

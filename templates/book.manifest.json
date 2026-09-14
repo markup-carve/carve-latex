@@ -1,0 +1,1 @@
+{ "name": "book", "template": "book.tex", "requiredMetadata": ["title"], "documentClass": "book" }

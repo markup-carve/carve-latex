@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Carve LaTeX project",
+  "type": "object",
+  "required": ["version", "chapters"],
+  "properties": {
+    "version": { "const": 1 },
+    "chapters": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "output": { "type": "string" },
+    "publish": { "type": "object" }
+  },
+  "additionalProperties": false
+}

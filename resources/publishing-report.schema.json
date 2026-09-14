@@ -3,7 +3,7 @@
   "$id": "https://markup-carve.github.io/carve-latex/publishing-report.schema.json",
   "title": "Carve LaTeX publishing report",
   "type": "object",
-  "required": ["schemaVersion", "sourceFormat", "targetFormat", "diagnostics"],
+  "required": ["schemaVersion", "sourceFormat", "targetFormat", "diagnostics", "summary"],
   "properties": {
     "schemaVersion": { "const": 2 },
     "sourceFormat": { "const": "carve-ast" },
@@ -19,11 +19,13 @@
           "severity": { "enum": ["info", "warning", "error"] },
           "fidelity": { "enum": ["preserved", "normalized", "degraded", "dropped"] },
           "confidence": { "enum": ["exact", "inferred", "fallback"] },
-          "path": { "type": "string" }
+          "path": { "type": "string" },
+          "source": { "type": "object", "properties": { "line": { "type": "integer" }, "column": { "type": "integer" }, "offset": { "type": "integer" } }, "additionalProperties": false }
         },
         "additionalProperties": false
       }
-    }
+    },
+    "summary": { "type": "object", "required": ["preserved", "normalized", "degraded", "dropped"], "properties": { "preserved": { "type": "integer" }, "normalized": { "type": "integer" }, "degraded": { "type": "integer" }, "dropped": { "type": "integer" } }, "additionalProperties": false }
   },
   "additionalProperties": false
 }

@@ -18,6 +18,7 @@ export interface PublishingDiagnostic {
   fidelity: Fidelity;
   confidence: Confidence;
   path?: string;
+  source?: { line?: number; column?: number; offset?: number };
 }
 
 export interface PublishingReport {
@@ -25,6 +26,7 @@ export interface PublishingReport {
   sourceFormat: 'carve-ast';
   targetFormat: 'latex';
   diagnostics: PublishingDiagnostic[];
+  summary: Record<Fidelity, number>;
 }
 
 export type DocumentClass = 'article' | 'report' | 'book' | 'thesis';
@@ -32,6 +34,7 @@ export type DocumentClass = 'article' | 'report' | 'book' | 'thesis';
 export interface PublishOptions {
   documentClass?: DocumentClass;
   template?: string;
+  preset?: 'article' | 'book' | 'thesis' | 'journal' | 'technical-report';
   assetRoot?: string;
   standalone?: boolean;
   title?: string;
@@ -45,10 +48,24 @@ export interface PublishOptions {
   numberedHeadings?: boolean;
   tableOfContents?: boolean;
   index?: boolean;
+  indexes?: string[];
   glossaries?: boolean;
+  abstract?: string;
+  acknowledgements?: string;
+  dedication?: string;
+  keywords?: string[];
+  appendices?: boolean;
+  listOfFigures?: boolean;
+  listOfTables?: boolean;
   generatedBibliography?: string;
+  cslBibliography?: string[];
+  generatedGlossary?: string;
   strict?: boolean;
   allowRawLatex?: boolean;
+  failOn?: Exclude<Fidelity, 'preserved'>;
+  pdfa?: boolean;
+  taggedPdf?: boolean;
+  renderDiagrams?: boolean;
 }
 
 export interface RenderResult {
@@ -63,10 +80,31 @@ export interface CompileOptions {
   keepIntermediate?: boolean;
   sourceDateEpoch?: number;
   runs?: number;
+  qualityGate?: boolean;
+  verifyReproducible?: boolean;
 }
 
 export interface CompileResult extends RenderResult {
   pdfPath: string;
   texPath: string;
   commands: string[][];
+  quality: PdfQualityReport;
+}
+
+export interface PdfQualityReport {
+  missingReferences: string[];
+  missingCitations: string[];
+  missingGlyphs: string[];
+  overfullBoxes: string[];
+  unembeddedFonts: string[];
+  tagged?: boolean;
+  pdfVersion?: string;
+  reproducible?: boolean;
+}
+
+export interface ProjectManifest {
+  version: 1;
+  chapters: string[];
+  output?: string;
+  publish?: PublishOptions;
 }

@@ -111,10 +111,12 @@ test('keeps executable TeX inert across code, raw blocks, math, and URLs', () =>
     { type: 'code_block', content: '\\end{carvecode}\\input{/etc/passwd}' },
     { type: 'raw_block', format: 'html', content: '\\end{carvecode}\\input{/etc/passwd}' },
     paragraph({ type: 'math', display: false, content: '\\input{/etc/passwd}' }),
+    paragraph({ type: 'math', display: false, content: '^^5cinput{/etc/passwd}' }),
     paragraph({ type: 'link', href: 'https://example.test/a_b#c&d=1%', children: [text('safe')] }),
   ] });
   assert.doesNotMatch(result.value, /\\end\{carvecode\}\\input/);
   assert.doesNotMatch(result.value, /\\\(\\input/);
+  assert.doesNotMatch(result.value, /\\\(\^\^5cinput/);
   assert.equal(result.report.diagnostics.some((item) => item.code === 'unsafe-math-degraded'), true);
   assert.match(result.value, /a\\_b\\#c\\&d=1\\%/);
 });

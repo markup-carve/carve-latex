@@ -31,5 +31,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: sudo apt-get update && sudo apt-get install -y texlive-luatex texlive-latex-extra texlive-fonts-recommended biber
-      - run: node dist/cli.js examples/paper.crv --pdf --output examples/paper.pdf --source-date-epoch 0
+      - run: node dist/cli.js examples/paper.crv --pdf --output examples/paper.pdf --source-date-epoch 0 --quality-gate
       - run: test -s examples/paper.pdf
+      - run: node dist/cli.js --project examples/book.carve-latex.yml --output examples/book.tex --sarif examples/book.sarif
+      - run: test -s examples/book.tex && test -s examples/book.sarif
+      - run: node dist/cli.js --project examples/book.carve-latex.yml --pdf --preset book --output examples/book.pdf --quality-gate
+      - run: test -s examples/book.pdf

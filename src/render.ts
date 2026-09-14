@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { encodeLiteralBlock, escapeIndex, escapeLatex, escapeUrl, safeLabel } from './escape.js';
 import { metadataOptions, readMetadata } from './metadata.js';
 import { applyTemplate, DEFAULT_TEMPLATE } from './template.js';
+import { cslToBiblatex } from './citations.js';
 import type { AstNode, PublishOptions, PublishingDiagnostic, RenderResult } from './types.js';
 
 type Context = {
@@ -11,6 +13,7 @@ type Context = {
   footnotes: Map<string, AstNode>;
   citations: Set<string>;
   citationDefinitions: Map<string, AstNode>;
+  abbreviations: Map<string, AstNode>;
   path: string[];
 };
 
@@ -23,31 +26,44 @@ export function renderAst(document: AstNode, supplied: PublishOptions = {}): Ren
   const metadata = readMetadata(document);
   const options = defaults({ ...metadataOptions(metadata), ...supplied });
   const context: Context = { options, diagnostics: [], footnotes: collect(document, 'footnote', 'label'),
-    citations: new Set(), citationDefinitions: collect(document, 'citation_definition', 'key'), path: [] };
+    citations: new Set(), citationDefinitions: collect(document, 'citation_definition', 'key'),
+    abbreviations: collect(document, 'abbreviation_def', 'abbr'), path: [] };
   const body = renderChildren(document.children ?? [], context, true);
   prepareBibliography(context);
-  const template = options.template ? readFileSync(options.template, 'utf8') : DEFAULT_TEMPLATE;
+  prepareGlossary(context);
+  validatePreset(context, document);
+  const preset = options.preset ? fileURLToPath(new URL(`../templates/${options.preset}.tex`, import.meta.url)) : undefined;
+  const template = options.template ? readFileSync(options.template, 'utf8') : preset ? readFileSync(preset, 'utf8') : DEFAULT_TEMPLATE;
   const value = options.standalone === false ? body : applyTemplate(template, body, options);
   if (options.strict && context.diagnostics.some((item) => item.fidelity === 'degraded' || item.fidelity === 'dropped')) {
     throw new Error('Strict publishing rejected degraded or dropped content.');
   }
+  const summary = { preserved: 0, normalized: 0, degraded: 0, dropped: 0 };
+  for (const item of context.diagnostics) summary[item.fidelity] += 1;
   return {
     value,
     metadata,
-    report: { schemaVersion: 2, sourceFormat: 'carve-ast', targetFormat: 'latex', diagnostics: context.diagnostics },
+    report: { schemaVersion: 2, sourceFormat: 'carve-ast', targetFormat: 'latex', diagnostics: context.diagnostics, summary },
   };
 }
 
+function validatePreset(context: Context, document: AstNode): void {
+  const requirements: Record<string, Array<'title' | 'author'>> = { book: ['title'], thesis: ['title', 'author'], journal: ['title', 'author'], 'technical-report': ['title', 'author'] };
+  for (const field of requirements[context.options.preset ?? ''] ?? []) if (!context.options[field]) diagnostic(context, document, 'missing-template-metadata', `The ${context.options.preset} preset requires ${field}.`, 'degraded');
+}
+
 function defaults(options: PublishOptions): Context['options'] {
+  const { preset: ignoredPreset, citeStyle: ignoredCiteStyle, ...safeOptions } = options;
   const documentClass = ['article', 'report', 'book', 'thesis'].includes(String(options.documentClass)) ? options.documentClass! : 'article';
   const paper = ['a4paper', 'letterpaper'].includes(String(options.paper)) ? options.paper! : 'a4paper';
+  const preset = ['article', 'book', 'thesis', 'journal', 'technical-report'].includes(String(options.preset)) ? options.preset : undefined;
   const margin = /^\d+(?:\.\d+)?(?:mm|cm|in|pt)$/.test(String(options.margin ?? '')) ? options.margin! : '25mm';
   return {
-    ...options, documentClass, paper, margin,
+    ...safeOptions, documentClass, paper, margin, ...(preset ? { preset } : {}),
     lang: /^(?:en|de|fr|es|it|pt)$/.test(String(options.lang ?? 'en')) ? String(options.lang ?? 'en') : 'en',
     ...(/^[A-Za-z0-9_-]+$/.test(String(options.citeStyle ?? '')) ? { citeStyle: options.citeStyle } : {}),
     numberedHeadings: options.numberedHeadings ?? true,
-    tableOfContents: options.tableOfContents ?? false, index: options.index ?? false,
+    tableOfContents: options.tableOfContents ?? false, index: options.index ?? Boolean(options.indexes?.length),
     glossaries: options.glossaries ?? false, standalone: options.standalone ?? true,
   };
 }
@@ -134,10 +150,15 @@ function renderInline(node: AstNode, context: Context): string {
     case 'mention': return `@${escapeLatex(String(node.user ?? node.name ?? ''))}`;
     case 'tag': {
       const name = String(node.name ?? '');
-      return `\\#${escapeLatex(name)}${context.options.index ? `\\index{${escapeIndex(name)}}` : ''}`;
+      const action = node.attrs?.indexRange === 'start' ? '|(' : node.attrs?.indexRange === 'end' ? '|)' : typeof node.attrs?.see === 'string' ? `|see{${escapeIndex(node.attrs.see)}}` : '';
+      const indexName = typeof node.attrs?.indexName === 'string' && context.options.indexes?.includes(node.attrs.indexName) ? `[${safeLabel(node.attrs.indexName)}]` : '';
+      return `\\#${escapeLatex(name)}${context.options.index ? `\\index${indexName}{${escapeIndex(name)}${action}}` : ''}`;
     }
     case 'symbol': return escapeLatex(String(node.value ?? node.name ?? ''));
-    case 'abbreviation': return `\\textsc{${escapeLatex(String(node.abbr ?? ''))}}`;
+    case 'abbreviation': {
+      const abbr = String(node.abbr ?? '');
+      return context.options.glossaries && context.abbreviations.has(abbr) ? `\\gls{${safeLabel(abbr)}}` : `\\textsc{${escapeLatex(abbr)}}`;
+    }
     case 'span': case 'inline_extension': return content();
     case 'smart_punctuation': return escapeLatex(String(node.value ?? ''));
     case 'substitution': return escapeLatex(String(node.newText ?? ''));
@@ -192,7 +213,24 @@ function codeBlock(node: AstNode, context: Context): string {
     diagnostic(context, node, 'diagram-source-degraded', `${languageName} is printed as source; pre-render it to an image for publication.`, 'degraded');
   }
   const label = languageName ? `\\carvecodelabel{${escapeLatex(languageName)}}\n` : '';
-  return `${label}\\begin{carvecode}\n${encodeLiteralBlock(value)}\n\\end{carvecode}`;
+  return `${label}\\begin{carvecode}\n${highlightCode(value, languageName)}\n\\end{carvecode}`;
+}
+
+function highlightCode(value: string, language: string): string {
+  const supported = new Set(['javascript', 'js', 'typescript', 'ts', 'rust', 'python', 'py', 'java', 'c', 'cpp', 'css', 'html', 'xml', 'json', 'bash', 'sh', 'sql']);
+  if (!supported.has(language)) return encodeLiteralBlock(value);
+  const keywords = new Set(['as', 'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'def', 'do', 'else', 'enum', 'export', 'false', 'fn', 'for', 'from', 'function', 'if', 'impl', 'import', 'in', 'interface', 'let', 'match', 'mod', 'new', 'null', 'pub', 'return', 'self', 'static', 'struct', 'super', 'switch', 'this', 'throw', 'trait', 'true', 'try', 'type', 'use', 'var', 'void', 'where', 'while', 'yield']);
+  return value.split('\n').map((line) => {
+    const tokens = line.match(/\/\/.*|#.*|--.*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$]*\b|[^A-Za-z0-9_$]+/g) ?? [line];
+    return tokens.map((token) => {
+      const encoded = encodeLiteralBlock(token);
+      if (/^(?:\/\/|#|--|\/\*)/.test(token)) return `\\textcolor{carvecomment}{${encoded}}`;
+      if (/^["']/.test(token)) return `\\textcolor{carvestring}{${encoded}}`;
+      if (/^\d/.test(token)) return `\\textcolor{carvenumber}{${encoded}}`;
+      if (keywords.has(token)) return `\\textcolor{carvekeyword}{${encoded}}`;
+      return encoded;
+    }).join('');
+  }).join('\\par\n');
 }
 
 function table(node: AstNode, context: Context): string {
@@ -200,27 +238,51 @@ function table(node: AstNode, context: Context): string {
   const columns = Math.max(1, ...rows.map((row) => (row.cells ?? row.children ?? []).length));
   const first = rows[0];
   const columnsMetadata = (node.columns as Array<Record<string, unknown>> | undefined) ?? [];
-  const alignments = Array.from({ length: columns }, (_, index) => ({ left: 'l', center: 'c', right: 'r' } as Record<string, string>)[String((first?.cells ?? first?.children ?? [])[index]?.align ?? columnsMetadata[index]?.align)] ?? 'l');
-  if (rows.some((row) => (row.cells ?? row.children ?? []).some((cell) => cell.span === 'rowspan' || cell.span === 'colspan'))) {
-    diagnostic(context, node, 'table-span-degraded', 'Spanning table cells were flattened into a regular LaTeX table.', 'degraded');
-  }
+  const alignmentNames = Array.from({ length: columns }, (_, index) => String((first?.cells ?? first?.children ?? [])[index]?.align ?? columnsMetadata[index]?.align ?? 'left'));
+  const alignments = alignmentNames.map((name) => ({ left: 'l', center: 'c', right: 'r' } as Record<string, string>)[name] ?? 'l');
+  const columnSpecs = columnsMetadata.map((column, index) => {
+    if (typeof column.width !== 'number') return alignments[index] ?? 'l';
+    const family = column.valign === 'middle' ? 'm' : column.valign === 'bottom' ? 'b' : 'p';
+    const alignment = alignmentNames[index] === 'right' ? '>{\\raggedleft\\arraybackslash}' : alignmentNames[index] === 'center' ? '>{\\centering\\arraybackslash}' : '>{\\raggedright\\arraybackslash}';
+    return `${alignment}${family}{${Math.max(0.01, Math.min(1, column.width))}\\linewidth}`;
+  });
+  while (columnSpecs.length < columns) columnSpecs.push(alignments[columnSpecs.length] ?? 'l');
   while (alignments.length < columns) alignments.push('l');
   const lines = rows.map((row, rowIndex) => {
     const cells = row.cells ?? row.children ?? [];
-    const values = cells.map((cell) => renderChildren(cell.children ?? [], context)).concat(Array(Math.max(0, columns - cells.length)).fill(''));
+    const values: string[] = [];
+    for (let column = 0; column < cells.length; column += 1) {
+      const cell = cells[column]!;
+      if (cell.span === 'rowspan') { values.push(''); continue; }
+      if (cell.span === 'colspan') continue;
+      let colspan = 1; while (cells[column + colspan]?.span === 'colspan') colspan += 1;
+      let rowspan = 1; while ((rows[rowIndex + rowspan]?.cells ?? rows[rowIndex + rowspan]?.children ?? [])[column]?.span === 'rowspan') rowspan += 1;
+      let rendered = renderChildren(cell.children ?? [], context);
+      if (rowspan > 1) rendered = `\\multirow{${rowspan}}{*}{${rendered}}`;
+      if (colspan > 1) rendered = `\\multicolumn{${colspan}}{${alignments[column]}}{${rendered}}`;
+      values.push(rendered); column += colspan - 1;
+    }
     return `${values.join(' & ')} \\\\${rowIndex === 0 && cells.some((cell) => cell.header === true) ? ' \\midrule' : ''}`;
   });
-  return `\\begin{longtable}{${alignments.join('')}}\n\\toprule\n${lines.join('\n')}\n\\bottomrule\n\\end{longtable}`;
+  const caption = Array.isArray(node.caption) ? `\\caption${Array.isArray(node.shortCaption) ? `[${renderChildren(node.shortCaption as AstNode[], context)}]` : ''}{${renderChildren(node.caption as AstNode[], context)}} \\\\n` : '';
+  const explicitHeadRows = (node.rowGroups as { headRows?: number } | undefined)?.headRows;
+  const headRows = typeof explicitHeadRows === 'number' ? explicitHeadRows : (rows[0]?.cells ?? []).some((cell) => cell.header) ? 1 : 0;
+  const repeatedHead = headRows > 0 ? `\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\bottomrule\n\\endfirsthead\n\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\bottomrule\n\\endhead\n${lines.slice(headRows).join('\n')}` : `\\toprule\n${lines.join('\n')}`;
+  const note = typeof node.attrs?.note === 'string' ? `\n\\multicolumn{${columns}}{l}{\\footnotesize ${escapeLatex(node.attrs.note)}} \\\\` : '';
+  const renderedTable = `\\begin{longtable}{${columnSpecs.join('')}}\n${caption}${repeatedHead}${note}\n\\bottomrule\n\\end{longtable}`;
+  return node.attrs?.landscape === true ? environment('landscape', renderedTable) : renderedTable;
 }
 
 function figure(node: AstNode, context: Context): string {
   const target = node.target as AstNode | undefined;
   const rendered = target ? (target.type === 'image' ? imageCommand(target, context) : renderBlock(target, context)) : renderChildren(node.children ?? [], context, true);
   const captionNodes = node.caption as AstNode[] | undefined;
-  const caption = captionNodes ? `\n\\caption{${renderChildren(captionNodes, context)}}` : '';
+  const short = Array.isArray(node.shortCaption) ? `[${renderChildren(node.shortCaption as AstNode[], context)}]` : '';
+  const caption = captionNodes ? `\n\\caption${short}{${renderChildren(captionNodes, context)}}` : '';
   const id = node.id ?? node.attrs?.id;
   const label = id ? `\n\\label{${safeLabel(String(id))}}` : '';
-  return `\\begin{figure}[htbp]\n\\centering\n${rendered}${caption}${label}\n\\end{figure}`;
+  const placement = /^(?:h|t|b|p|!)+$/.test(String(node.attrs?.placement ?? '')) ? String(node.attrs?.placement) : 'htbp';
+  return `\\begin{figure}[${placement}]\n\\centering\n${rendered}${caption}${label}\n\\end{figure}`;
 }
 
 function figureGroup(node: AstNode, context: Context): string {
@@ -245,6 +307,9 @@ function admonition(node: AstNode, context: Context): string {
 
 function div(node: AstNode, context: Context): string {
   const name = String(node.name ?? node.kind ?? '');
+  if (name === 'appendix' || name === 'appendices') return `\\appendix\n${renderChildren(node.children ?? [], context, true)}`;
+  if (name === 'abstract' || name === 'acknowledgements') return environment(name === 'abstract' ? 'abstract' : 'quote', renderChildren(node.children ?? [], context, true));
+  if (name === 'epigraph') return `\\begin{flushright}\\itshape\n${renderChildren(node.children ?? [], context, true)}\\end{flushright}`;
   if (['theorem', 'lemma', 'proposition', 'corollary', 'definition', 'proof', 'remark'].includes(name)) return environment(name, renderChildren(node.children ?? [], context, true));
   diagnostic(context, node, 'container-flattened', `Container ${name || 'div'} was flattened without its visual wrapper.`, 'degraded');
   return renderChildren(node.children ?? [], context, true);
@@ -264,13 +329,16 @@ function raw(node: AstNode, context: Context, block: boolean): string {
 
 function math(node: AstNode, context: Context): string {
   const value = String(node.content ?? node.value ?? plain(node));
-  const allowed = new Set(['frac', 'dfrac', 'tfrac', 'sqrt', 'sum', 'prod', 'int', 'iint', 'iiint', 'oint', 'lim', 'log', 'ln', 'exp', 'sin', 'cos', 'tan', 'min', 'max', 'inf', 'sup', 'det', 'gcd', 'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta', 'theta', 'vartheta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'pi', 'varpi', 'rho', 'varrho', 'sigma', 'varsigma', 'tau', 'upsilon', 'phi', 'varphi', 'chi', 'psi', 'omega', 'Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Pi', 'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega', 'mathrm', 'mathbf', 'mathit', 'mathsf', 'mathtt', 'mathcal', 'mathbb', 'mathfrak', 'operatorname', 'text', 'left', 'right', 'big', 'Big', 'bigg', 'Bigg', 'cdot', 'times', 'div', 'pm', 'mp', 'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'approx', 'equiv', 'in', 'notin', 'subset', 'subseteq', 'supset', 'supseteq', 'cup', 'cap', 'land', 'lor', 'neg', 'forall', 'exists', 'partial', 'nabla', 'infty', 'ell', 'hbar', 'prime', 'dots', 'ldots', 'cdots', 'vdots', 'ddots', 'overline', 'underline', 'hat', 'widehat', 'bar', 'vec', 'dot', 'ddot', 'binom', 'cases', 'begin', 'end']);
-  const commands = [...value.matchAll(/\\([A-Za-z@]+|.)/g)].map((match) => match[1]!);
-  const unsafe = commands.some((name) => /^[A-Za-z@]+$/.test(name) && !allowed.has(name)) || /\\begin\{(?!matrix\*?|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|aligned|gathered|split)\}/.test(value) || /\\end\{(?!matrix\*?|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|aligned|gathered|split)\}/.test(value);
+  const allowed = new Set(['frac', 'dfrac', 'tfrac', 'sqrt', 'sum', 'prod', 'int', 'iint', 'iiint', 'oint', 'lim', 'log', 'ln', 'exp', 'sin', 'cos', 'tan', 'min', 'max', 'inf', 'sup', 'det', 'gcd', 'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta', 'theta', 'vartheta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'pi', 'varpi', 'rho', 'varrho', 'sigma', 'varsigma', 'tau', 'upsilon', 'phi', 'varphi', 'chi', 'psi', 'omega', 'Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Pi', 'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega', 'mathrm', 'mathbf', 'mathit', 'mathsf', 'mathtt', 'mathcal', 'mathbb', 'mathfrak', 'operatorname', 'text', 'left', 'right', 'big', 'Big', 'bigg', 'Bigg', 'cdot', 'times', 'div', 'pm', 'mp', 'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'approx', 'equiv', 'in', 'notin', 'subset', 'subseteq', 'supset', 'supseteq', 'cup', 'cap', 'land', 'lor', 'neg', 'forall', 'exists', 'partial', 'nabla', 'infty', 'ell', 'hbar', 'prime', 'dots', 'ldots', 'cdots', 'vdots', 'ddots', 'overline', 'underline', 'hat', 'widehat', 'bar', 'vec', 'dot', 'ddot', 'binom']);
+  const permittedEnvironments = /\\(?:begin|end)\{(?:matrix\*?|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|aligned|gathered|split)\}/g;
+  const commands = [...value.replace(permittedEnvironments, '').matchAll(/\\([A-Za-z@]+|.)/g)].map((match) => match[1]!);
+  const unsafe = /[%#]|\^\^|\$/.test(value) || commands.some((name) => /^[A-Za-z@]+$/.test(name) && !allowed.has(name));
   if (unsafe) {
     diagnostic(context, node, 'unsafe-math-degraded', 'Potentially executable TeX in math was rendered as inert text.', 'degraded');
     return `\\texttt{${escapeLatex(value)}}`;
   }
+  const id = node.attrs?.id;
+  if (node.display === true && id) return `\\begin{equation}\\label{${safeLabel(String(id))}}\n${value}\n\\end{equation}`;
   return node.display === true ? `\\[${value}\\]` : `\\(${value}\\)`;
 }
 
@@ -286,7 +354,10 @@ function imageCommand(node: AstNode, context: Context): string {
   const path = context.options.assetRoot && !isAbsolute(source) ? resolve(context.options.assetRoot, source) : source;
   const safePath = path.replaceAll('\\', '/').replace(/[{}%#\r\n]/g, '');
   if (safePath !== path) diagnostic(context, node, 'image-path-normalized', 'TeX-special characters were removed from the local image path.', 'normalized');
-  return `\\includegraphics[width=\\linewidth]{\\detokenize{${safePath}}}`;
+  const authoredWidth = node.attrs?.width;
+  const width = typeof authoredWidth === 'number' && authoredWidth > 0 && authoredWidth <= 1 ? `${authoredWidth}\\linewidth` : typeof authoredWidth === 'string' && /^\d+(?:\.\d+)?(?:mm|cm|in|pt)$/.test(authoredWidth) ? authoredWidth : '\\linewidth';
+  const graphic = `\\includegraphics[width=${width}]{\\detokenize{${safePath}}}`;
+  return context.options.taggedPdf ? `\\tagstructbegin[tag=Figure,alttext={${escapeLatex(String(node.alt ?? ''))}}]${graphic}\\tagstructend` : graphic;
 }
 
 function footnoteReference(node: AstNode, context: Context): string {
@@ -310,13 +381,17 @@ function citation(node: AstNode, context: Context): string {
 function citationGroup(node: AstNode, context: Context): string {
   const citations = (node.children ?? node.items ?? []).filter((child) => child.type === 'citation');
   if (citations.length === 0) return renderChildren(node.children ?? [], context);
-  if (node.mode === 'integral') citations[0]!.integral = true;
-  return citations.map((item) => citation(item, context)).join('');
+  return citations.map((item, index) => citation(node.mode === 'integral' && index === 0 ? { ...item, integral: true } : item, context)).join('');
 }
 
 function prepareBibliography(context: Context): void {
-  if (context.citations.size === 0) return;
   const entries: string[] = [];
+  for (const file of context.options.cslBibliography ?? []) {
+    const path = context.options.assetRoot && !isAbsolute(file) ? resolve(context.options.assetRoot, file) : file;
+    try { entries.push(cslToBiblatex(JSON.parse(readFileSync(path, 'utf8')))); }
+    catch { diagnostic(context, { type: 'citation_definition' }, 'csl-import-degraded', `Could not import CSL JSON resource ${file}.`, 'degraded'); }
+  }
+  if (context.citations.size === 0 && entries.length === 0 && !context.options.generatedBibliography) return;
   for (const key of context.citations) {
     const definition = context.citationDefinitions.get(key);
     if (!definition) {
@@ -329,19 +404,27 @@ function prepareBibliography(context: Context): void {
     const values = definition.attrs?.keyValues as Record<string, string> | undefined;
     const author = bibtex(values?.author ?? 'Unknown'); const year = bibtex(values?.year ?? 'n.d.');
     const note = bibtex(plain(definition));
-    entries.push(`@misc{${key},\n  author = {${author}},\n  year = {${year}},\n  note = {${note}}\n}`);
+    const type = ['article', 'book', 'inproceedings', 'incollection', 'thesis', 'report', 'online', 'misc'].includes(String(values?.type)) ? values!.type : 'misc';
+    const fields = { author, year, title: bibtex(values?.title ?? note), journal: bibtex(values?.journal ?? ''), publisher: bibtex(values?.publisher ?? ''), doi: bibtex(values?.doi ?? ''), url: bibtex(values?.url ?? ''), note };
+    entries.push(`@${type}{${key},\n${Object.entries(fields).filter(([, value]) => value).map(([name, value]) => `  ${name} = {${value}}`).join(',\n')}\n}`);
   }
   if (entries.length > 0) {
-    context.options.generatedBibliography = entries.join('\n\n');
-    context.options.bibliography = [...(context.options.bibliography ?? []), 'carve-generated.bib'];
+    context.options.generatedBibliography = [context.options.generatedBibliography, ...entries].filter(Boolean).join('\n\n');
   }
+  if (context.options.generatedBibliography && !(context.options.bibliography ?? []).includes('carve-generated.bib')) context.options.bibliography = [...(context.options.bibliography ?? []), 'carve-generated.bib'];
 }
 
-function bibtex(value: string): string { return value.replace(/[{}\\]/g, '').replace(/\s+/g, ' ').trim(); }
+function prepareGlossary(context: Context): void {
+  if (!context.options.glossaries || context.abbreviations.size === 0) return;
+  context.options.generatedGlossary = [...context.abbreviations].map(([abbr, node]) => `\\newacronym{${safeLabel(abbr)}}{${escapeLatex(abbr)}}{${escapeLatex(String(node.expansion ?? ''))}}`).join('\n');
+}
+
+function bibtex(value: string): string { return value.replace(/[{}\\%#]/g, '').replace(/\s+/g, ' ').trim(); }
 
 function diagnostic(context: Context, node: AstNode, code: string, message: string, fidelity: PublishingDiagnostic['fidelity']): void {
+  const start = (node.pos as { start?: { line?: number; column?: number; offset?: number } } | undefined)?.start;
   context.diagnostics.push({ code, message, severity: fidelity === 'dropped' ? 'warning' : 'info', fidelity,
-    confidence: 'exact', path: context.path.join('/') || node.type });
+    confidence: 'exact', path: context.path.join('/') || node.type, ...(start ? { source: start } : {}) });
 }
 
 function command(name: string, value: string): string { return `\\${name}{${value}}`; }
