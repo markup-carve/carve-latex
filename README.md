@@ -91,7 +91,15 @@ publish:
   tableOfContents: true
 ```
 
-`readProject()` and `watchProject()` provide dependency-aware project loading and rebuild hooks. `--bundle` writes the PDF, editable TeX, fidelity report, build commands, quality results, and SHA-256 manifest together.
+Chapters may pull in other files with `{{ path }}`. A project expands them under a containment root that defaults to the project root, resolving a nested path against the file that wrote it. `includeRoot` narrows that root and must be an absolute path: a relative one would be resolved against whatever directory the build ran in, so it is refused rather than guessed. `includes: false` in the manifest, or `--no-includes` on the command line, leaves the directives literal. A target outside the root, a missing one and a cycle each leave the directive as written and report a warning on stderr.
+
+```yaml
+version: 1
+chapters: [front.crv, chapters/one.crv]
+includeRoot: /srv/book
+```
+
+`readProject()` and `watchProject()` provide dependency-aware project loading and rebuild hooks. `readProject()` returns the files expansion read as `includeDependencies`, and `watchProject()` rebuilds when one of them changes; a target that never resolved has no directory behind it, so creating a missing file still needs a manual rebuild. `--bundle` writes the PDF, editable TeX, fidelity report, build commands, quality results, and SHA-256 manifest together.
 
 With explicit `--render-diagrams`, PDF compilation renders Mermaid, PlantUML, Graphviz/DOT, Vega and Vega-Lite fences when their respective local tools (`mmdc`, `plantuml`, `dot`, `vg2svg`/`vl2svg`, and `rsvg-convert`) are available. The opt-in matters because these are external executables and may support their own include mechanisms. Missing tools leave readable source and a fidelity diagnostic; `carve-latex` itself contacts no diagram service.
 

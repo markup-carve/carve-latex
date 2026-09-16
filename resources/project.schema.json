@@ -7,6 +7,8 @@
     "version": { "const": 1 },
     "chapters": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
     "output": { "type": "string" },
+    "includes": { "type": "boolean" },
+    "includeRoot": { "type": "string", "minLength": 1 },
     "publish": { "type": "object" }
   },
   "additionalProperties": false

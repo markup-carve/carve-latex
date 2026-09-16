@@ -25,7 +25,8 @@ const flag = (...names: string[]): string | undefined => {
   return index >= 0 ? argv[index + 1] : undefined;
 };
 const has = (name: string): boolean => argv.includes(name);
-const project = projectArgument >= 0 ? readProject(input) : undefined;
+const project = projectArgument >= 0 ? readProject(input, { includes: !has('--no-includes') }) : undefined;
+for (const warning of project?.includeWarnings ?? []) console.error(`${warning.file ?? input}:${warning.line}:${warning.column}: ${warning.rule}: ${warning.message}`);
 const source = project ? '' : input === '-' ? readFileSync(0, 'utf8') : readFileSync(resolve(input), 'utf8');
 let ast;
 try {
@@ -37,7 +38,7 @@ try {
 if (has('--watch')) {
   if (!project) { console.error('--watch requires --project.'); process.exit(2); }
   const childArgs = process.argv.slice(1).filter((arg) => arg !== '--watch');
-  watchProject(input, () => { console.log('Rebuilding…'); spawnSync(process.execPath, childArgs, { stdio: 'inherit' }); });
+  watchProject(input, () => { console.log('Rebuilding…'); spawnSync(process.execPath, childArgs, { stdio: 'inherit' }); }, { includes: !has('--no-includes') });
   console.log(`Watching ${input}`);
   await new Promise(() => undefined);
 }
@@ -120,6 +121,7 @@ Outputs LaTeX by default. Use --pdf to compile with LuaLaTeX.
   --fail-on LEVEL          fail on normalized, degraded, or dropped
   --project PATH           build a multi-chapter project manifest
   --watch                  rebuild a project when its inputs change
+  --no-includes            leave {{ path }} directives literal in a project
   --bundle DIRECTORY       emit PDF, TeX, report, manifest, and checksums
   --class TYPE             article, report, book, or thesis
   --template PATH          custom {{body}} template
