@@ -3,7 +3,7 @@ import { compileAst, assertToolchain, inspectLog } from './compile.js';
 import { renderAst } from './render.js';
 import type { AstNode, CompileOptions, PublishOptions } from './types.js';
 export { reportFails, reportToSarif } from './diagnostics.js';
-export { publishBundle, readProject, watchProject } from './project.js';
+export { publishBundle, readProject, watchProject, type Project } from './project.js';
 export { prepareDiagrams } from './assets.js';
 export { cslToBiblatex, fetchDoiCitation } from './citations.js';
 

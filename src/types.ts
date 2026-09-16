@@ -106,5 +106,22 @@ export interface ProjectManifest {
   version: 1;
   chapters: string[];
   output?: string;
+  /** Set false to leave `{{ path }}` directives literal. */
+  includes?: boolean;
+  /** Containment root for includes. Must be absolute; defaults to the project root. */
+  includeRoot?: string;
   publish?: PublishOptions;
+}
+
+export interface ProjectOptions {
+  /** False disables include expansion whatever the manifest says. */
+  includes?: boolean;
+}
+
+export interface IncludeDiagnostic {
+  rule: string;
+  message: string;
+  line: number;
+  column: number;
+  file?: string;
 }
