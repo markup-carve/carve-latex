@@ -161,7 +161,16 @@ function renderInline(node: AstNode, context: Context): string {
     }
     case 'span': case 'inline_extension': return content();
     case 'smart_punctuation': return escapeLatex(String(node.value ?? ''));
-    case 'substitution': return escapeLatex(String(node.newText ?? ''));
+    // Both halves are inline arrays, and an empty one is `[]`, so it must not
+    // leave a bare `\sout{}` behind. The commands match `delete` and `insert`
+    // above, which is the pairing the reference ANSI and HTML renderers show.
+    case 'substitution': {
+      const half = (key: 'old' | 'new', name: string) => {
+        const nodes = (node[key] as AstNode[] | undefined) ?? [];
+        return nodes.length > 0 ? command(name, renderChildren(nodes, context)) : '';
+      };
+      return `${half('old', 'sout')}${half('new', 'uline')}`;
+    }
     default:
       diagnostic(context, node, 'unsupported-inline', `Unsupported inline ${node.type} was flattened.`, 'degraded');
       return content() || escapeLatex(String(node.value ?? ''));
