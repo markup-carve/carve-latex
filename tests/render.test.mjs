@@ -88,11 +88,21 @@ test('parses Carve through the canonical engine', () => {
   assert.match(result.value, /\\emph\{careful\}/);
 });
 
+// From SOURCE, so the field names come from the engine rather than from this
+// file. Read by hand they were `oldText` and `newText`, which the engine has
+// never published, and the arm returned an empty string with no diagnostic.
+test('keeps both halves of a substitution the engine parsed', () => {
+  const result = renderCarve('A {~/old/~>*new*~} run.\n', { standalone: false });
+  assert.match(result.value, /\\sout\{\\emph\{old\}\}\\uline\{\\textbf\{new\}\}/);
+  assert.deepEqual(result.report.diagnostics, []);
+});
+
 test('renders structured AST fields without losing authored content', () => {
   const result = renderAst({ type: 'document', children: [
     paragraph({ type: 'inline_footnote', inline: [text('Inline note')] }, text(' '),
       { type: 'abbreviation', abbr: 'AST', expansion: 'abstract syntax tree' }, text(' '),
-      { type: 'substitution', oldText: 'old', newText: 'new' }),
+      { type: 'substitution', old: [text('was')], new: [{ type: 'emphasis', children: [text('is')] }] }, text(' '),
+      { type: 'substitution', old: [], new: [text('added')] }),
     { type: 'definition_list', items: [
       { type: 'definition_term', children: [text('Term')] },
       { type: 'definition_description', children: [paragraph(text('Meaning'))] },
@@ -101,7 +111,9 @@ test('renders structured AST fields without losing authored content', () => {
   ] });
   assert.match(result.value, /\\footnote\{Inline note\}/);
   assert.match(result.value, /\\textsc\{AST\}/);
-  assert.match(result.value, /new/);
+  assert.match(result.value, /\\sout\{was\}\\uline\{\\emph\{is\}\}/);
+  // An empty half is `[]`, and it must not leave a bare \sout{} behind.
+  assert.match(result.value, /(?<!\\sout\{\})\\uline\{added\}/);
   assert.match(result.value, /\\item\[Term\] Meaning/);
   assert.match(result.value, /\\caption\{Result\}/);
 });
