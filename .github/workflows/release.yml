@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      # `write`, not `read`: a DRAFT release is invisible to a caller without
+      # push access, so the gate below would report "no release" for a draft
+      # that is sitting right there. See markup-carve/carve-wasm#80.
+      contents: write
+    steps:
+      # The notes are not the workflow's to write. A CHANGELOG entry is one or
+      # two lines for a contributor, which makes poor release notes for someone
+      # deciding whether to upgrade, so a human writes the draft first.
+      #
+      # Listed rather than addressed by tag: a draft's tag is not a git ref, so
+      # `gh release view <tag>` can match nothing and still exit 0.
+      - name: A release draft for this tag exists and has notes
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq "[.[] | select(.tag_name == \"$GITHUB_REF_NAME\")] | first")"
+          if [ -z "$release" ]; then
+            echo "::error::no release for $GITHUB_REF_NAME. Write the notes first:" \
+                 "gh release create $GITHUB_REF_NAME --draft --notes-file NOTES.md"
+            exit 1
+          fi
+          body="$(printf '%s' "$release" | jq -r '.body // ""' | tr -d '[:space:]')"
+          [ -n "$body" ] \
+            || { echo "::error::the release for $GITHUB_REF_NAME has no notes"; exit 1; }
+          printf '%s' "$release" | jq -r '"draft=\(.draft) tag=\(.tag_name)"'
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: The release tag is on main
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::$GITHUB_REF_NAME is not on the main line"; exit 1; }
+
+      - name: The version surfaces agree
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            [ "$version" = "$GITHUB_REF_NAME" ] \
+              || { echo "::error::package.json is $version, tag is $GITHUB_REF_NAME"; exit 1; }
+          fi
+          grep -qE "^## \[?${version//./\\.}\]? - " CHANGELOG.md \
+            || { echo "::error::CHANGELOG.md has no dated section for $version"; exit 1; }
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # A git dependency in runtime `dependencies` ships to every consumer, who
+      # then needs git and GitHub reachability and has no registry tarball to
+      # check an integrity hash against.
+      - name: No dependency is installed over git
+        run: |
+          node -e '
+            const deps = require("./package.json").dependencies ?? {};
+            const git = Object.entries(deps).filter(([, r]) => /^(git|github:|[^@/]+\/[^@/]+$)/.test(r));
+            if (git.length) {
+              console.log(`::error::git dependency: ${git.map(([n, r]) => `${n}@${r}`).join(", ")}`);
+              process.exit(1);
+            }
+          '
+
+      - name: The npm credential authenticates
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          [ -n "$NPM_TOKEN" ] \
+            || { echo "::error::NPM_TOKEN is not configured"; exit 1; }
+          code="$(curl -sS -o /tmp/npm-who.json -w '%{http_code}' \
+            -H "Authorization: Bearer $NPM_TOKEN" \
+            https://registry.npmjs.org/-/whoami)"
+          [ "$code" = 200 ] \
+            || { echo "::error::NPM_TOKEN does not authenticate (HTTP $code)"; exit 1; }
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+      # The package is useless without the templates and resources it loads at
+      # run time, and `files` is easy to narrow by accident.
+      - name: The package carries its templates and resources
+        run: |
+          tarball="$(npm pack --silent)"
+          listing="$(tar -tzf "$tarball")"
+          for path in package/dist/cli.js package/templates package/resources; do
+            printf '%s\n' "$listing" | grep -q "^$path" \
+              || { echo "::error::$tarball is missing $path"; exit 1; }
+          done
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            npm publish --dry-run --access public
+            echo "::notice::rehearsal - nothing was published"
+          else
+            npm publish --access public
+          fi
+
+      # Publish the draft a human wrote. Addressed by ID with tag_name sent,
+      # because omitting tag_name on a draft clears the tag to `untagged-...`.
+      - name: Publish the release notes written for this tag
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq "[.[] | select(.tag_name == \"$GITHUB_REF_NAME\")] | first | .id // empty")"
+          [ -n "$id" ] || { echo "::error::the release for $GITHUB_REF_NAME vanished"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id" -X PATCH \
+            -f tag_name="$GITHUB_REF_NAME" -F draft=false >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id" \
+            --jq 'if .draft then error("release is still a draft") else "published \(.tag_name)" end'
