@@ -22,6 +22,7 @@ Every supported structural node is translated from the canonical AST rather than
 | Measure | Result |
 |---------|-------:|
 | Fidelity | 100 |
+^ Fidelity of the translated constructs
 
 ```rust
 fn main() {
