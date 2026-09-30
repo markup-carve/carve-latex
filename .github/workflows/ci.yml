@@ -20,6 +20,23 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm pack --dry-run
+  # `npm ci` installs the lockfile, so the jobs above only ever see one point in
+  # the `^0.1.7` range the manifest declares - and a consumer installing today
+  # gets whatever the range resolves to. This job is the only one that renders
+  # against that. It is a gate, not an advisory: an engine release this repo
+  # cannot render against is this repo's problem before it is a user's.
+  resolved-range:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --no-package-lock
+      - run: node -p "'engine ' + require('@markup-carve/carve/package.json').version"
+      - run: npm run check
+      - run: npm test
+
   latex-smoke:
     runs-on: ubuntu-latest
     steps:

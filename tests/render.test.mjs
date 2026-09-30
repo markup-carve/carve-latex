@@ -118,6 +118,32 @@ test('renders structured AST fields without losing authored content', () => {
   assert.match(result.value, /\\caption\{Result\}/);
 });
 
+test('a code payload that carries its terminating newline gains no trailing paragraph', () => {
+  // `\par` also appears in the preamble (\parskip, \parindent), so count inside
+  // the environment only.
+  const codeEnvironment = (node) => {
+    const value = renderAst({ type: 'document', children: [node] }).value;
+    const found = value.match(/\\begin\{carvecode\}\n([\s\S]*?)\n\\end\{carvecode\}/);
+    assert.ok(found, 'no carvecode environment was rendered');
+    return found[1];
+  };
+  const breaks = (node) => (codeEnvironment(node).match(/\\par\n/g) ?? []).length;
+
+  // carve 0.1.8+ puts the payload's final newline in `content`. The nodes are
+  // built here rather than parsed, so the assertions hold on either contract.
+  assert.equal(breaks({ type: 'code_block', lang: 'js', content: 'const a = 1;\nconst b = 2;\n' }), 1);
+  // The unhighlighted path encodes the newline itself, so it needs its own case.
+  assert.equal(breaks({ type: 'code_block', lang: 'unsupported-lang', content: 'one\ntwo\n' }), 1);
+  // An authored blank final line is payload, not the contract's terminator, so
+  // it still separates from the payload that has no blank line at all.
+  assert.equal(breaks({ type: 'code_block', lang: 'js', content: 'a\n' }), 0);
+  assert.equal(breaks({ type: 'code_block', lang: 'js', content: 'a\n\n' }), 1);
+  // A payload with no terminator (pre-0.1.8, or a hand-built node) is unchanged,
+  // and an empty one must not lose a byte it never had.
+  assert.equal(breaks({ type: 'code_block', lang: 'js', content: 'const a = 1;' }), 0);
+  assert.equal(codeEnvironment({ type: 'code_block', content: '' }), '');
+});
+
 test('keeps executable TeX inert across code, raw blocks, math, and URLs', () => {
   const result = renderAst({ type: 'document', children: [
     { type: 'code_block', content: '\\end{carvecode}\\input{/etc/passwd}' },
