@@ -144,6 +144,22 @@ test('a code payload that carries its terminating newline gains no trailing para
   assert.equal(codeEnvironment({ type: 'code_block', content: '' }), '');
 });
 
+// From SOURCE, so the payload shape comes from whichever engine is installed
+// rather than from this file. The hand-built cases above cannot see the next
+// move of a verbatim field; this one can, which is what gives the resolved-range
+// CI job teeth on this surface.
+test('a parsed code block emits one line per payload line', () => {
+  const environment = (source) => {
+    const found = renderCarve(source, { standalone: false }).value
+      .match(/\\begin\{carvecode\}\n([\s\S]*?)\n\\end\{carvecode\}/);
+    assert.ok(found, 'no carvecode environment was rendered');
+    return found[1];
+  };
+  assert.equal((environment('``` js\nconst a = 1;\n```\n').match(/\\par\n/g) ?? []).length, 0);
+  assert.equal((environment('``` js\nconst a = 1;\nconst b = 2;\n```\n').match(/\\par\n/g) ?? []).length, 1);
+  assert.equal((environment('~~~\nplain\n~~~\n').match(/\\par\n/g) ?? []).length, 0);
+});
+
 test('keeps executable TeX inert across code, raw blocks, math, and URLs', () => {
   const result = renderAst({ type: 'document', children: [
     { type: 'code_block', content: '\\end{carvecode}\\input{/etc/passwd}' },
