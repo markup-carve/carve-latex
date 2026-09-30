@@ -215,7 +215,13 @@ function definitionList(node: AstNode, context: Context): string {
 }
 
 function codeBlock(node: AstNode, context: Context): string {
-  const value = String(node.value ?? node.content ?? plain(node));
+  // carve 0.1.8 moved the payload's terminating newline into `content`, and the
+  // template below supplies the newline before \end. Drop exactly that one byte:
+  // a code payload's other bytes are meaningful, so an authored blank final line
+  // survives. Only code_block changed; raw_block and math still end at the last
+  // payload character.
+  const payload = String(node.value ?? node.content ?? plain(node));
+  const value = payload.endsWith('\n') ? payload.slice(0, -1) : payload;
   const languageName = String(node.lang ?? '').toLowerCase();
   const diagram = ['mermaid', 'chart', 'vega', 'plantuml'].includes(languageName);
   if (diagram) {
