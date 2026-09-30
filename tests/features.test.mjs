@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inspectLog, prepareDiagrams, readProject, renderAst, renderCarve, reportFails, reportToSarif } from '../dist/index.js';
+import { DEFAULT_TEMPLATE } from '../dist/template.js';
 
 const text = (value) => ({ type: 'text', value });
 
@@ -83,4 +84,25 @@ test('a diagnostic carries the source position SARIF needs', () => {
   const [first] = reportToSarif(result.report, 'doc.crv').runs[0].results;
   assert.equal(first.locations[0].physicalLocation.artifactLocation.uri, 'doc.crv');
   assert.equal(first.locations[0].physicalLocation.region.startLine, 3);
+});
+
+// Every environment `admonition()` and `div()` can name has to exist in every
+// shipped template, or an ordinary document does not compile under a preset.
+// `remark` is the fallback for every non-theorem admonition kind, so it is the
+// one that breaks first; `proof` comes from amsthm and needs no declaration.
+test('every shipped template declares the theorem environments the renderer emits', () => {
+  const environments = ['theorem', 'lemma', 'proposition', 'corollary', 'definition', 'remark'];
+  const sources = { '(default)': DEFAULT_TEMPLATE };
+  for (const preset of ['article', 'book', 'thesis', 'journal', 'technical-report']) {
+    sources[preset] = readFileSync(new URL(`../templates/${preset}.tex`, import.meta.url), 'utf8');
+  }
+  const missing = [];
+  for (const [name, source] of Object.entries(sources)) {
+    for (const environment of environments) {
+      if (!new RegExp(String.raw`\\newtheorem\*?(\[[a-z]+\])?\{${environment}\}`).test(source)) {
+        missing.push(`${name}: ${environment}`);
+      }
+    }
+  }
+  assert.deepEqual(missing, []);
 });

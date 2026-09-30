@@ -17,6 +17,10 @@ Carve keeps the authoring source readable while `carve-latex` owns publication t
 Every supported structural node is translated from the canonical AST rather than reparsed from HTML.
 :::
 
+::: note "On the fidelity report"
+Every unsupported construct is classified rather than dropped in silence.
+:::
+
 ## Data
 
 | Measure | Result |

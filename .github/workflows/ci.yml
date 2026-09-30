@@ -54,3 +54,11 @@ jobs:
       - run: test -s examples/book.tex && test -s examples/book.sarif
       - run: node dist/cli.js --project examples/book.carve-latex.yml --pdf --preset book --output examples/book.pdf --quality-gate
       - run: test -s examples/book.pdf
+      # Every non-theorem admonition kind renders as `remark`, and a preset
+      # template that does not declare it produces TeX that will not compile.
+      - run: |
+          for preset in article book thesis journal technical-report; do
+            node dist/cli.js examples/paper.crv --pdf --preset "$preset" \
+              --output "examples/preset-$preset.pdf" --source-date-epoch 0
+            test -s "examples/preset-$preset.pdf"
+          done
