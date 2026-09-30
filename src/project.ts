@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { expandIncludes, parse, toAstJson } from '@markup-carve/carve';
 import { fileSystemResolver } from '@markup-carve/carve/node';
+import { carveExtensions } from './citations.js';
 import { compileAst } from './compile.js';
 import type { AstNode, CompileOptions, IncludeDiagnostic, ProjectManifest, ProjectOptions, PublishOptions } from './types.js';
 
@@ -50,7 +51,7 @@ export function readProject(path: string, options: ProjectOptions = {}): Project
   const includeDependencies: string[] = [];
   const children = chapterPaths.flatMap((chapter) => {
     const source = readFileSync(chapter, 'utf8');
-    let document = parse(source);
+    let document = parse(source, { extensions: carveExtensions({ ...(manifest.publish ?? {}), assetRoot: root }) });
     if (resolver) {
       const expanded = expandIncludes(document, source, { resolve: resolver, sourcePath: chapter });
       document = expanded.doc;

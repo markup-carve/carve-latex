@@ -117,3 +117,128 @@ test('the book preset pairs its class with the sectioning commands it uses', () 
   assert.match(rendered.value, /\\documentclass\[a4paper,openany\]\{book\}/);
   assert.match(rendered.value, /\\begin\{document\}\\frontmatter/);
 });
+
+// From Carve SOURCE, not a hand-built node. Citations are Tier-2 and off in the
+// engine by default, so the renderer's cite path was unreachable from a real
+// document while the AST-level tests passed.
+test('a cite written in Carve source reaches \\autocite', () => {
+  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nA cite [@key1].\n');
+  assert.match(result.value, /\\autocite\{key1\}/);
+});
+
+test('an integral cite written in source reaches \\textcite', () => {
+  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nSee [+@key1].\n');
+  assert.match(result.value, /\\textcite\{key1\}/);
+});
+
+test('an author-suppressed cite written in source reaches \\autocite*', () => {
+  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nSee [-@key1].\n');
+  assert.match(result.value, /\\autocite\*\{key1\}/);
+});
+
+test('a cite against a declared bibliography needs no generated entry', () => {
+  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nA cite [@key1].\n');
+  assert.doesNotMatch(result.value, /carve-generated\.bib/);
+});
+
+test('a source bibliography definition becomes a resolvable BibLaTeX entry', () => {
+  const result = renderCarve('A cite [@key1].\n\n[@key1]: Ada Example. A Title. 2026.\n');
+  assert.match(result.value, /@misc\{key1,/);
+});
+
+test('a cite in a project chapter reaches \\autocite too', () => {
+  const root = mkdtempSync(join(tmpdir(), 'carve-latex-cite-'));
+  writeFileSync(join(root, 'one.crv'), 'A cite [@key1].\n\n[@key1]: Ada Example. A Title. 2026.\n');
+  writeFileSync(join(root, 'book.yml'), 'version: 1\nchapters: [one.crv]\n');
+  const result = renderAst(readProject(join(root, 'book.yml')).document);
+  assert.match(result.value, /\\autocite\{key1\}/);
+});
+
+// `^ Figure #:` asks the host to number the caption and \caption already
+// supplies "Figure 1:", so rendering the authored label gave "Figure 1:
+// Figure : A plot".
+test('an auto-numbered figure caption drops the authored label', () => {
+  const result = renderCarve('![a](p.png)\n^ Figure #: A plot\n', { standalone: false });
+  assert.match(result.value, /\\caption\{A plot\}/);
+});
+
+test('an auto-numbered table caption drops the authored label', () => {
+  const result = renderCarve('| a |\n|---|\n| 1 |\n^ Table #: Results\n', { standalone: false });
+  assert.match(result.value, /\\caption\{Results\} \\\\\n\\toprule/);
+});
+
+test('a caption that merely starts with the word Figure survives verbatim', () => {
+  const result = renderCarve('![a](p.png)\n^ Figure of the result\n', { standalone: false });
+  assert.match(result.value, /\\caption\{Figure of the result\}/);
+});
+
+test('a caption with a colon but no number placeholder survives verbatim', () => {
+  const result = renderCarve('![a](p.png)\n^ Figure: A plot\n', { standalone: false });
+  assert.match(result.value, /\\caption\{Figure: A plot\}/);
+});
+
+test('a number placeholder away from the label position is not a label', () => {
+  const result = renderCarve('![a](p.png)\n^ A plot # of values: revised\n', { standalone: false });
+  assert.match(result.value, /\\caption\{A plot  of values: revised\}/);
+});
+
+test('only the first colon after the number ends the label', () => {
+  const result = renderCarve('![a](p.png)\n^ Figure #: A plot: revised\n', { standalone: false });
+  assert.match(result.value, /\\caption\{A plot: revised\}/);
+});
+
+// A warning printed "Remark", and the title the AST carries was read by
+// nothing at all.
+test('an admonition renders the title the engine parsed', () => {
+  const result = renderCarve('::: note "A titled note"\nbody\n:::\n', { standalone: false });
+  assert.match(result.value, /\\begin\{carvenote\}\[\{A titled note\}\]/);
+});
+
+test('a title containing a bracket stays inside the optional argument', () => {
+  const result = renderCarve('::: tip "With a ] bracket"\nbody\n:::\n', { standalone: false });
+  assert.match(result.value, /\\begin\{carvetip\}\[\{With a \] bracket\}\]/);
+});
+
+test('each notice kind gets its own environment', () => {
+  const kinds = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote'];
+  const seen = kinds.map((kind) => {
+    const result = renderCarve(`::: ${kind}\nbody\n:::\n`, { standalone: false });
+    return new RegExp(String.raw`\\begin\{carve${kind}\}`).test(result.value) ? kind : `${kind}: wrong environment`;
+  });
+  assert.deepEqual(seen, kinds);
+});
+
+test('a theorem kind carries its title as the amsthm optional argument', () => {
+  const result = renderCarve('::: theorem "Pythagoras"\nbody\n:::\n', { standalone: false });
+  assert.match(result.value, /\\begin\{theorem\}\[\{Pythagoras\}\]/);
+});
+
+test('a structural container reaches its own environment, not remark', () => {
+  const result = renderCarve('::: abstract\nAn abstract.\n:::\n', { standalone: false });
+  assert.match(result.value, /\\begin\{abstract\}/);
+});
+
+test('a title a structural container cannot carry is reported, not dropped in silence', () => {
+  const result = renderCarve('::: abstract "A dropped title"\nBody.\n:::\n', { standalone: false });
+  assert.equal(result.report.diagnostics[0].code, 'admonition-title-dropped');
+});
+
+test('an unrecognized kind still falls back to remark and says so', () => {
+  const result = renderCarve('::: sidebar\nbody\n:::\n', { standalone: false });
+  assert.equal(result.report.diagnostics[0].code, 'admonition-normalized');
+});
+
+test('every shipped template declares the notice environments the renderer emits', () => {
+  const notices = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote'];
+  const sources = { '(default)': DEFAULT_TEMPLATE };
+  for (const preset of ['article', 'book', 'thesis', 'journal', 'technical-report']) {
+    sources[preset] = readFileSync(new URL(`../templates/${preset}.tex`, import.meta.url), 'utf8');
+  }
+  const missing = [];
+  for (const [name, source] of Object.entries(sources)) {
+    for (const notice of notices) {
+      if (!new RegExp(String.raw`\\newtheorem\*\{carve${notice}\}`).test(source)) missing.push(`${name}: carve${notice}`);
+    }
+  }
+  assert.deepEqual(missing, []);
+});

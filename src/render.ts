@@ -142,7 +142,10 @@ function renderInline(node: AstNode, context: Context): string {
     case 'citation': return citation(node, context);
     case 'citation_group': return citationGroup(node, context);
     case 'heading_ref': return `\\cref{${safeLabel(String(node.target ?? node.id ?? plain(node)))}}`;
-    case 'caption_number': return typeof node.n === 'number' ? String(node.n) : '';
+    case 'caption_number':
+      if (typeof node.n === 'number') return String(node.n);
+      diagnostic(context, node, 'caption-number-normalized', 'A caption number outside the label position has no counter and was dropped.', 'normalized');
+      return '';
     case 'hard_break': return '\\\\';
     case 'soft_break': return '\n';
     case 'raw_inline': return raw(node, context, false);
@@ -249,6 +252,29 @@ function highlightCode(value: string, language: string): string {
   }).join('\\par\n');
 }
 
+// `^ Figure #: A plot` asks the host to number the caption, and \caption
+// already supplies "Figure 1:". Rendering the authored label too gives
+// "Figure 1: Figure : A plot", so the label prefix is dropped and LaTeX's own
+// counter is left to it.
+//
+// The auto-number form is a `caption_number` in the label position with the
+// text right after it opening on a colon. A `#` anywhere else is the author's
+// own character and the caption is rendered verbatim, so `A plot # of values`
+// and `Figure: A plot` both survive untouched.
+function caption(nodes: AstNode[], context: Context): string {
+  return renderChildren(withoutNumberLabel(nodes), context);
+}
+
+function withoutNumberLabel(nodes: AstNode[]): AstNode[] {
+  const at = nodes[0]?.type === 'caption_number' ? 0 : nodes[0]?.type === 'text' && nodes[1]?.type === 'caption_number' ? 1 : -1;
+  if (at < 0) return nodes;
+  const after = nodes[at + 1];
+  if (after?.type !== 'text' || !String(after.value ?? '').startsWith(':')) return nodes;
+  const remainder = String(after.value ?? '').slice(1).replace(/^ /, '');
+  const tail = nodes.slice(at + 2);
+  return remainder ? [{ ...after, value: remainder }, ...tail] : tail;
+}
+
 function table(node: AstNode, context: Context): string {
   const rows = node.rows ?? node.children ?? [];
   const columns = Math.max(1, ...rows.map((row) => (row.cells ?? row.children ?? []).length));
@@ -280,12 +306,12 @@ function table(node: AstNode, context: Context): string {
     }
     return `${values.join(' & ')} \\\\${rowIndex === 0 && cells.some((cell) => cell.header === true) ? ' \\midrule' : ''}`;
   });
-  const caption = Array.isArray(node.caption) ? `\\caption${Array.isArray(node.shortCaption) ? `[${renderChildren(node.shortCaption as AstNode[], context)}]` : ''}{${renderChildren(node.caption as AstNode[], context)}} \\\\\n` : '';
+  const captionText = Array.isArray(node.caption) ? `\\caption${Array.isArray(node.shortCaption) ? `[${caption(node.shortCaption as AstNode[], context)}]` : ''}{${caption(node.caption as AstNode[], context)}} \\\\\n` : '';
   const explicitHeadRows = (node.rowGroups as { headRows?: number } | undefined)?.headRows;
   const headRows = typeof explicitHeadRows === 'number' ? explicitHeadRows : (rows[0]?.cells ?? []).some((cell) => cell.header) ? 1 : 0;
   const repeatedHead = headRows > 0 ? `\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\bottomrule\n\\endfirsthead\n\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\bottomrule\n\\endhead\n${lines.slice(headRows).join('\n')}` : `\\toprule\n${lines.join('\n')}`;
   const note = typeof node.attrs?.note === 'string' ? `\n\\multicolumn{${columns}}{l}{\\footnotesize ${escapeLatex(node.attrs.note)}} \\\\` : '';
-  const renderedTable = `\\begin{longtable}{${columnSpecs.join('')}}\n${caption}${repeatedHead}${note}\n\\bottomrule\n\\end{longtable}`;
+  const renderedTable = `\\begin{longtable}{${columnSpecs.join('')}}\n${captionText}${repeatedHead}${note}\n\\bottomrule\n\\end{longtable}`;
   return node.attrs?.landscape === true ? environment('landscape', renderedTable) : renderedTable;
 }
 
@@ -294,31 +320,49 @@ function figure(node: AstNode, context: Context): string {
   const rendered = target ? (target.type === 'image' ? imageCommand(target, context) : renderBlock(target, context)) : renderChildren(node.children ?? [], context, true);
   const captionNodes = node.caption as AstNode[] | undefined;
   const short = Array.isArray(node.shortCaption) ? `[${renderChildren(node.shortCaption as AstNode[], context)}]` : '';
-  const caption = captionNodes ? `\n\\caption${short}{${renderChildren(captionNodes, context)}}` : '';
+  const captionText = captionNodes ? `\n\\caption${short}{${caption(captionNodes, context)}}` : '';
   const id = node.id ?? node.attrs?.id;
   const label = id ? `\n\\label{${safeLabel(String(id))}}` : '';
   const placement = /^(?:h|t|b|p|!)+$/.test(String(node.attrs?.placement ?? '')) ? String(node.attrs?.placement) : 'htbp';
-  return `\\begin{figure}[${placement}]\n\\centering\n${rendered}${caption}${label}\n\\end{figure}`;
+  return `\\begin{figure}[${placement}]\n\\centering\n${rendered}${captionText}${label}\n\\end{figure}`;
 }
 
 function figureGroup(node: AstNode, context: Context): string {
   const rendered = (node.children ?? []).map((panel) => `\\begin{minipage}{0.48\\linewidth}\n\\centering\n${panel.type === 'figure' ? figureTarget(panel, context) : renderBlock(panel, context)}\n\\end{minipage}`).join('\\hfill\n');
-  const caption = Array.isArray(node.caption) ? `\n\\caption{${renderChildren(node.caption as AstNode[], context)}}` : '';
-  return `\\begin{figure}[htbp]\n\\centering\n${rendered}${caption}\n\\end{figure}`;
+  const captionText = Array.isArray(node.caption) ? `\n\\caption{${caption(node.caption as AstNode[], context)}}` : '';
+  return `\\begin{figure}[htbp]\n\\centering\n${rendered}${captionText}\n\\end{figure}`;
 }
 
 function figureTarget(node: AstNode, context: Context): string {
   const target = node.target as AstNode | undefined;
   const body = target ? (target.type === 'image' ? imageCommand(target, context) : renderBlock(target, context)) : '';
-  const caption = Array.isArray(node.caption) ? `\n\\captionof{subfigure}{${renderChildren(node.caption as AstNode[], context)}}` : '';
-  return `${body}${caption}`;
+  const captionText = Array.isArray(node.caption) ? `\n\\captionof{subfigure}{${caption(node.caption as AstNode[], context)}}` : '';
+  return `${body}${captionText}`;
 }
+
+// The engine makes every `::: word` an admonition, so this is also the only
+// path a structural container arrives by.
+const THEOREM_KINDS = ['theorem', 'lemma', 'proposition', 'corollary', 'definition', 'proof', 'remark'];
+const NOTICE_KINDS = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote'];
+const STRUCTURAL_KINDS = ['abstract', 'acknowledgements', 'epigraph', 'appendix', 'appendices'];
 
 function admonition(node: AstNode, context: Context): string {
   const kind = String(node.kind ?? node.name ?? node.variant ?? 'remark').toLowerCase();
-  const theorem = ['theorem', 'lemma', 'proposition', 'corollary', 'definition', 'proof', 'remark'].includes(kind) ? kind : 'remark';
-  if (theorem !== kind) diagnostic(context, node, 'admonition-normalized', `Admonition ${kind} uses the remark environment.`, 'normalized');
-  return environment(theorem, renderChildren(node.children ?? [], context, true));
+  const title = Array.isArray(node.title) ? renderChildren(node.title as AstNode[], context).trim() : '';
+  if (STRUCTURAL_KINDS.includes(kind)) {
+    // \begin{abstract} and \appendix take no title, so say so rather than
+    // dropping the author's words in silence.
+    if (title) diagnostic(context, node, 'admonition-title-dropped', `The ${kind} container cannot carry a title.`, 'dropped');
+    return div({ ...node, name: kind }, context);
+  }
+  // A notice kind gets its own environment so a warning does not print
+  // "Remark". Theorem kinds keep the names the templates already declare.
+  const name = THEOREM_KINDS.includes(kind) ? kind : NOTICE_KINDS.includes(kind) ? `carve${kind}` : undefined;
+  if (!name) diagnostic(context, node, 'admonition-normalized', `Admonition ${kind} uses the remark environment.`, 'normalized');
+  // Braced, because an amsthm optional argument ends at the first unbraced `]`
+  // and a title may legitimately contain one.
+  const argument = title ? `[{${title}}]` : '';
+  return environment(name ?? 'remark', renderChildren(node.children ?? [], context, true), argument);
 }
 
 function div(node: AstNode, context: Context): string {
@@ -447,7 +491,7 @@ function diagnostic(context: Context, node: AstNode, code: string, message: stri
 }
 
 function command(name: string, value: string): string { return `\\${name}{${value}}`; }
-function environment(name: string, value: string): string { return `\\begin{${name}}\n${value.trim()}\n\\end{${name}}`; }
+function environment(name: string, value: string, argument = ''): string { return `\\begin{${name}}${argument}\n${value.trim()}\n\\end{${name}}`; }
 function plain(node: AstNode): string { return (node.children ?? []).map((child) => String(child.value ?? plain(child))).join(''); }
 function find(node: AstNode, type: string): AstNode | undefined {
   if (node.type === type) return node;
