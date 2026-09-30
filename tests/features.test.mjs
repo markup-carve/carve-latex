@@ -106,3 +106,14 @@ test('every shipped template declares the theorem environments the renderer emit
   }
   assert.deepEqual(missing, []);
 });
+
+// The book preset is the only template that uses \frontmatter and \mainmatter,
+// which the article class does not define. Its class cannot come from an option
+// that defaults to article.
+test('the book preset pairs its class with the sectioning commands it uses', () => {
+  const template = readFileSync(new URL('../templates/book.tex', import.meta.url), 'utf8');
+  assert.match(template, /\\documentclass\[[^\]]*\]\{book\}/);
+  const rendered = renderCarve('# Chapter\n\nText.\n', { preset: 'book' });
+  assert.match(rendered.value, /\\documentclass\[a4paper,openany\]\{book\}/);
+  assert.match(rendered.value, /\\begin\{document\}\\frontmatter/);
+});
