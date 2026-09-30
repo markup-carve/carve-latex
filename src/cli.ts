@@ -124,6 +124,10 @@ Outputs LaTeX by default. Use --pdf to compile with LuaLaTeX.
   --no-includes            leave {{ path }} directives literal in a project
   --bundle DIRECTORY       emit PDF, TeX, report, manifest, and checksums
   --class TYPE             article, report, book, or thesis
+  --title TEXT             document title, overriding frontmatter
+  --author TEXT            document author, overriding frontmatter
+  --lang CODE              en, de, fr, es, it, or pt
+  --margin LENGTH          page margin, such as 25mm
   --template PATH          custom {{body}} template
   --preset NAME            article, book, thesis, journal, or technical-report
   --bibliography A,B       BibLaTeX resource files

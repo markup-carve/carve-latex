@@ -44,7 +44,7 @@ test('emits safe syntax color and richer BibLaTeX fields', () => {
 });
 
 test('exports SARIF, thresholds, and source positions', () => {
-  const result = renderAst({ type: 'document', children: [{ type: 'comment', value: 'x', pos: { start: { line: 4, column: 2 } } }] });
+  const result = renderAst({ type: 'document', children: [{ type: 'comment', value: 'x', pos: { startLine: 4, endLine: 4, startColumn: 2 } }] });
   assert.equal(result.report.summary.dropped, 1);
   assert.equal(reportFails(result.report, 'degraded'), true);
   const sarif = reportToSarif(result.report, 'paper.crv');
