@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { inspectLog, prepareDiagrams, readProject, renderAst, reportFails, reportToSarif } from '../dist/index.js';
+import { inspectLog, prepareDiagrams, readProject, renderAst, renderCarve, reportFails, reportToSarif } from '../dist/index.js';
 
 const text = (value) => ({ type: 'text', value });
 
@@ -27,7 +27,7 @@ test('renders spanning, captioned tables with repeated heads', () => {
     { type: 'table_row', cells: [{ type: 'table_cell', header: false, children: [text('A')] }, { type: 'table_cell', header: false, children: [text('1')] }] },
     { type: 'table_row', cells: [{ type: 'table_cell', header: false, span: 'rowspan', children: [] }, { type: 'table_cell', header: false, children: [text('2')] }] },
   ] }] });
-  assert.match(result.value, /\\caption\{Results\}/);
+  assert.match(result.value, /\\caption\{Results\} \\\\\n\\toprule/);
   assert.match(result.value, /\\multicolumn\{2\}\{l\}\{Head\}/);
   assert.match(result.value, /\\endfirsthead/);
 });
@@ -44,7 +44,7 @@ test('emits safe syntax color and richer BibLaTeX fields', () => {
 });
 
 test('exports SARIF, thresholds, and source positions', () => {
-  const result = renderAst({ type: 'document', children: [{ type: 'comment', value: 'x', pos: { start: { line: 4, column: 2 } } }] });
+  const result = renderAst({ type: 'document', children: [{ type: 'comment', value: 'x', pos: { startLine: 4, endLine: 4, startColumn: 2 } }] });
   assert.equal(result.report.summary.dropped, 1);
   assert.equal(reportFails(result.report, 'degraded'), true);
   const sarif = reportToSarif(result.report, 'paper.crv');
@@ -68,4 +68,19 @@ test('reports PDF log quality and leaves unsupported diagram source intact', () 
   const root = mkdtempSync(join(tmpdir(), 'carve-latex-assets-'));
   const ast = { type: 'document', children: [{ type: 'code_block', lang: 'unknown', content: 'x' }] };
   assert.equal(prepareDiagrams(ast, root).children[0].type, 'code_block');
+});
+
+test('a line block keeps the indentation the engine encodes as non-breaking spaces', () => {
+  const result = renderCarve('::: |\nflush\n   indented\n:::\n', { standalone: false });
+  assert.match(result.value, /flush\\\\~~~indented/);
+  assert.deepEqual(result.report.diagnostics, []);
+});
+
+test('a diagnostic carries the source position SARIF needs', () => {
+  const result = renderCarve('Text.\n\n%% a dropped comment\n');
+  const dropped = result.report.diagnostics.find((item) => item.code === 'comment-dropped');
+  assert.equal(dropped.source.line, 3);
+  const [first] = reportToSarif(result.report, 'doc.crv').runs[0].results;
+  assert.equal(first.locations[0].physicalLocation.artifactLocation.uri, 'doc.crv');
+  assert.equal(first.locations[0].physicalLocation.region.startLine, 3);
 });

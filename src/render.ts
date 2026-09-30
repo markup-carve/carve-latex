@@ -161,6 +161,7 @@ function renderInline(node: AstNode, context: Context): string {
     }
     case 'span': case 'inline_extension': return content();
     case 'smart_punctuation': return escapeLatex(String(node.value ?? ''));
+    case 'non_breaking_space': return '~';
     // Both halves are inline arrays, and an empty one is `[]`, so it must not
     // leave a bare `\sout{}` behind. The commands match `delete` and `insert`
     // above, which is the pairing the reference ANSI and HTML renderers show.
@@ -279,7 +280,7 @@ function table(node: AstNode, context: Context): string {
     }
     return `${values.join(' & ')} \\\\${rowIndex === 0 && cells.some((cell) => cell.header === true) ? ' \\midrule' : ''}`;
   });
-  const caption = Array.isArray(node.caption) ? `\\caption${Array.isArray(node.shortCaption) ? `[${renderChildren(node.shortCaption as AstNode[], context)}]` : ''}{${renderChildren(node.caption as AstNode[], context)}} \\\\n` : '';
+  const caption = Array.isArray(node.caption) ? `\\caption${Array.isArray(node.shortCaption) ? `[${renderChildren(node.shortCaption as AstNode[], context)}]` : ''}{${renderChildren(node.caption as AstNode[], context)}} \\\\\n` : '';
   const explicitHeadRows = (node.rowGroups as { headRows?: number } | undefined)?.headRows;
   const headRows = typeof explicitHeadRows === 'number' ? explicitHeadRows : (rows[0]?.cells ?? []).some((cell) => cell.header) ? 1 : 0;
   const repeatedHead = headRows > 0 ? `\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\bottomrule\n\\endfirsthead\n\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\bottomrule\n\\endhead\n${lines.slice(headRows).join('\n')}` : `\\toprule\n${lines.join('\n')}`;
@@ -437,7 +438,10 @@ function prepareGlossary(context: Context): void {
 function bibtex(value: string): string { return value.replace(/[{}\\%#]/g, '').replace(/\s+/g, ' ').trim(); }
 
 function diagnostic(context: Context, node: AstNode, code: string, message: string, fidelity: PublishingDiagnostic['fidelity']): void {
-  const start = (node.pos as { start?: { line?: number; column?: number; offset?: number } } | undefined)?.start;
+  const pos = node.pos as { startLine?: number; startColumn?: number; startOffset?: number } | undefined;
+  const start = typeof pos?.startLine === 'number'
+    ? { line: pos.startLine, ...(typeof pos.startColumn === 'number' ? { column: pos.startColumn } : {}), ...(typeof pos.startOffset === 'number' ? { offset: pos.startOffset } : {}) }
+    : undefined;
   context.diagnostics.push({ code, message, severity: fidelity === 'dropped' ? 'warning' : 'info', fidelity,
     confidence: 'exact', path: context.path.join('/') || node.type, ...(start ? { source: start } : {}) });
 }
