@@ -26,11 +26,14 @@ export function compileAst(document: AstNode, publish: PublishOptions = {}, comp
   };
   const latex = ['--interaction=nonstopmode', '--halt-on-error', '--file-line-error', '--no-shell-escape', `${job}.tex`];
   run('lualatex', latex);
-  if (rendered.value.includes('{biblatex}')) run('biber', [job]);
-  if (rendered.value.includes('\\makeindex')) run('makeindex', [`${job}.idx`], true);
+  const usesBiblatex = rendered.value.includes('{biblatex}');
+  if (usesBiblatex) run('biber', [job]);
+  const usesIndex = rendered.value.includes('\\makeindex');
+  if (usesIndex) run('makeindex', [`${job}.idx`], true);
   for (const name of rendered.value.matchAll(/\\makeindex\[name=([A-Za-z][A-Za-z0-9_-]*)/g)) run('makeindex', [`${job}-${name[1]}.idx`], true);
-  if (rendered.value.includes('\\makeglossaries')) run('makeglossaries', [job], true);
-  for (let pass = 1; pass < (compile.runs ?? 2); pass += 1) run('lualatex', latex);
+  const usesGlossaries = rendered.value.includes('\\makeglossaries');
+  if (usesGlossaries) run('makeglossaries', [job], true);
+  for (let pass = 1; pass < latexPasses(rendered.value, compile.runs); pass += 1) run('lualatex', latex);
   const built = join(temporary, `${job}.pdf`);
   if (!existsSync(built)) throw new Error(`LuaLaTeX completed without producing ${built}`);
   const quality = inspectLog(existsSync(join(temporary, `${job}.log`)) ? readFileSync(join(temporary, `${job}.log`), 'utf8') : '');
@@ -53,6 +56,18 @@ export function compileAst(document: AstNode, publish: PublishOptions = {}, comp
   copyFileSync(built, output);
   if (!compile.keepIntermediate && !compile.workDir) rmSync(temporary, { recursive: true, force: true });
   return { ...rendered, pdfPath: output, texPath: compile.keepIntermediate || compile.workDir ? texPath : '', commands, quality };
+}
+
+// A tool that writes an auxiliary file needs three LaTeX passes, not two: the
+// first writes the tool's input, the second typesets what the tool produced
+// and only then declares the labels inside it, and the third resolves the
+// references to those labels. Stopping at two leaves "There were undefined
+// references" in the log, which is a real unresolved reference rather than a
+// warning to wave through.
+export function latexPasses(tex: string, runs?: number): number {
+  if (typeof runs === 'number') return runs;
+  const auxiliary = tex.includes('{biblatex}') || tex.includes('\\makeindex') || tex.includes('\\makeglossaries');
+  return auxiliary ? 3 : 2;
 }
 
 export function inspectLog(log: string): PdfQualityReport {

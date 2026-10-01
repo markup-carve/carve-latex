@@ -1,5 +1,5 @@
 import { fromAstJson, parse, toAstJson } from '@markup-carve/carve';
-import { compileAst, assertToolchain, inspectLog } from './compile.js';
+import { compileAst, assertToolchain, inspectLog, latexPasses } from './compile.js';
 import { carveExtensions } from './citations.js';
 import { renderAst } from './render.js';
 import type { AstNode, CompileOptions, PublishOptions } from './types.js';
@@ -24,5 +24,5 @@ export function compileCarve(source: string, publish: PublishOptions = {}, compi
   return compileAst(parseCarve(source, publish), publish, compile);
 }
 
-export { assertToolchain, compileAst, inspectLog, renderAst };
+export { assertToolchain, compileAst, inspectLog, latexPasses, renderAst };
 export type * from './types.js';

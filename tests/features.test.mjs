@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { inspectLog, prepareDiagrams, readProject, renderAst, renderCarve, reportFails, reportToSarif } from '../dist/index.js';
+import { inspectLog, latexPasses, prepareDiagrams, readProject, renderAst, renderCarve, reportFails, reportToSarif } from '../dist/index.js';
 import { DEFAULT_TEMPLATE } from '../dist/template.js';
 
 const text = (value) => ({ type: 'text', value });
@@ -241,4 +241,18 @@ test('every shipped template declares the notice environments the renderer emits
     }
   }
   assert.deepEqual(missing, []);
+});
+
+// Two passes leave a bibliography's own labels unresolved, which the quality
+// gate reports as a real undefined reference.
+test('a document with a bibliography gets a third LaTeX pass', () => {
+  assert.equal(latexPasses('\\usepackage[backend=biber]{biblatex}'), 3);
+});
+
+test('a document with no auxiliary tool keeps two passes', () => {
+  assert.equal(latexPasses('\\documentclass{article}'), 2);
+});
+
+test('an explicit pass count still wins', () => {
+  assert.equal(latexPasses('\\usepackage[backend=biber]{biblatex}', 1), 1);
 });
