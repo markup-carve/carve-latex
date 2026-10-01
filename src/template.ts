@@ -35,6 +35,8 @@ export const DEFAULT_TEMPLATE = String.raw`{{documentMetadata}}
 \newtheorem{corollary}[theorem]{Corollary}
 \theoremstyle{definition}\newtheorem{definition}[theorem]{Definition}
 \theoremstyle{remark}\newtheorem*{remark}{Remark}
+\newtheorem*{carvenote}{Note}\newtheorem*{carvetip}{Tip}\newtheorem*{carvewarning}{Warning}\newtheorem*{carvedanger}{Danger}
+\newtheorem*{carveinfo}{Information}\newtheorem*{carvesuccess}{Success}\newtheorem*{carveexample}{Example}\newtheorem*{carvequote}{Quote}
 \newenvironment{carvecode}{\par\smallskip\begingroup\ttfamily\small\raggedright\setlength{\parindent}{0pt}}{\par\endgroup\smallskip}
 \newcommand{\carvecodelabel}[1]{\par\smallskip\noindent\colorbox{black!8}{\scriptsize\sffamily #1}\par\nobreak}
 \definecolor{carvekeyword}{RGB}{116,72,164}\definecolor{carvestring}{RGB}{38,127,72}\definecolor{carvenumber}{RGB}{153,85,32}\definecolor{carvecomment}{RGB}{100,106,115}

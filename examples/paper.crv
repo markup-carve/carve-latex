@@ -9,7 +9,8 @@ tableOfContents: true
 
 # Introduction
 
-Carve keeps the authoring source readable while `carve-latex` owns publication typography.
+Carve keeps the authoring source readable while `carve-latex` owns publication typography
+[@carve2026], which a second cite states integrally as [+@carve2026].
 
 ## A theorem
 
@@ -21,12 +22,40 @@ Every supported structural node is translated from the canonical AST rather than
 Every unsupported construct is classified rather than dropped in silence.
 :::
 
+::: warning
+A warning prints its own label, not "Remark".
+:::
+
+::: tip
+Each notice kind has its own environment.
+:::
+
+::: danger
+So does this one.
+:::
+
+::: info
+And this one.
+:::
+
+::: success
+And this one.
+:::
+
+::: example
+And this one.
+:::
+
+::: quote
+And this one.
+:::
+
 ## Data
 
 | Measure | Result |
 |---------|-------:|
 | Fidelity | 100 |
-^ Fidelity of the translated constructs
+^ Table #: Fidelity of the translated constructs
 
 ```rust
 fn main() {

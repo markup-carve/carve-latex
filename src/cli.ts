@@ -28,9 +28,11 @@ const has = (name: string): boolean => argv.includes(name);
 const project = projectArgument >= 0 ? readProject(input, { includes: !has('--no-includes') }) : undefined;
 for (const warning of project?.includeWarnings ?? []) console.error(`${warning.file ?? input}:${warning.line}:${warning.column}: ${warning.rule}: ${warning.message}`);
 const source = project ? '' : input === '-' ? readFileSync(0, 'utf8') : readFileSync(resolve(input), 'utf8');
+const assetRoot = input === '-' ? process.cwd() : dirname(resolve(input));
+const cslBibliography = flag('--csl')?.split(',').filter(Boolean);
 let ast;
 try {
-  ast = project?.document ?? (has('--from-json') ? readAst(JSON.parse(source)) : parseCarve(source));
+  ast = project?.document ?? (has('--from-json') ? readAst(JSON.parse(source)) : parseCarve(source, { assetRoot, ...(cslBibliography ? { cslBibliography } : {}) }));
 } catch (error) {
   console.error(`Cannot read ${input}: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
@@ -43,7 +45,6 @@ if (has('--watch')) {
   await new Promise(() => undefined);
 }
 const bibliography = flag('--bibliography')?.split(',').filter(Boolean);
-const cslBibliography = flag('--csl')?.split(',').filter(Boolean);
 let generatedBibliography: string | undefined;
 if (flag('--doi')) {
   try { generatedBibliography = (await Promise.all(flag('--doi')!.split(',').map((doi) => fetchDoiCitation(doi).then(cslToBiblatex)))).join('\n\n'); }
@@ -65,7 +66,7 @@ const options: PublishOptions = {
   ...(generatedBibliography ? { generatedBibliography } : {}),
   ...(citeStyle ? { citeStyle } : {}),
   ...(preset ? { preset } : {}),
-  assetRoot: input === '-' ? process.cwd() : dirname(resolve(input)),
+  assetRoot,
   ...(has('--toc') ? { tableOfContents: true } : {}),
   ...(has('--index') ? { index: true } : {}),
   ...(has('--glossaries') ? { glossaries: true } : {}),

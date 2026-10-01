@@ -11,17 +11,18 @@ It complements [`carve-pdf`](https://github.com/markup-carve/carve-pdf):
 
 ## Install
 
-There is no published npm package yet, so install from a clone:
-
 ```bash
-git clone https://github.com/markup-carve/carve-latex.git
-cd carve-latex
-npm install
-npm run build
-npm link            # optional: puts `carve-latex` on your PATH
+npm install -g @markup-carve/carve-latex    # puts `carve-latex` on your PATH
+npm install @markup-carve/carve-latex       # or as a project dependency
 ```
 
-`npm run build` writes `dist/`, which the command entry point lives in. Without `npm link`, invoke it as `node dist/cli.js` wherever the examples below write `carve-latex`. Installing straight from the git URL does not work: the package ships only `dist/`, and nothing builds it on install.
+A project dependency is reachable as `npx carve-latex`, and the library is importable from `@markup-carve/carve-latex`.
+
+Installing from the git URL works too, for a branch or an unreleased commit. It builds `dist/` on install, so it needs the development dependencies and takes longer than the registry tarball:
+
+```bash
+npm install github:markup-carve/carve-latex
+```
 
 Generating `.tex` needs only Node.js 20+. PDF compilation additionally needs LuaLaTeX. Bibliographies use Biber; indexes use MakeIndex; glossaries use `makeglossaries` when installed.
 

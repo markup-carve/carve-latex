@@ -47,15 +47,39 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: sudo apt-get update && sudo apt-get install -y texlive-luatex texlive-latex-extra texlive-fonts-recommended biber
+      - run: sudo apt-get update && sudo apt-get install -y texlive-luatex texlive-latex-extra texlive-fonts-recommended biber poppler-utils
       - run: node dist/cli.js examples/paper.crv --pdf --output examples/paper.pdf --source-date-epoch 0 --quality-gate
       - run: test -s examples/paper.pdf
+      # An emitted \autocite that Biber never resolves is the same defect as
+      # no cite at all, so the gate reads the bibliography out of the PDF
+      # rather than out of the generated TeX. The text is flattened to one
+      # line first, because pdftotext wraps at the column the PDF wraps at and
+      # every string checked here is longer than a line is wide.
+      - name: The compiled PDF carries the rulings
+        run: |
+          pdftotext -nopgbrk examples/paper.pdf - | tr '\n' ' ' | tr -s ' ' > examples/paper.txt
+          need() {
+            grep -qF "$1" examples/paper.txt \
+              || { echo "::error::missing from the PDF: $1"; exit 1; }
+            echo "  found: $1"
+          }
+          refuse() {
+            if grep -qF "$1" examples/paper.txt; then
+              echo "::error::still in the PDF: $1"; exit 1
+            fi
+            echo "  absent: $1"
+          }
+          need 'Markup Carve contributors'
+          need 'Table 1: Fidelity of the translated constructs'
+          refuse 'Table : Fidelity'
+          need 'Warning'
+          need 'On the fidelity report'
       - run: node dist/cli.js --project examples/book.carve-latex.yml --output examples/book.tex --sarif examples/book.sarif
       - run: test -s examples/book.tex && test -s examples/book.sarif
       - run: node dist/cli.js --project examples/book.carve-latex.yml --pdf --preset book --output examples/book.pdf --quality-gate
       - run: test -s examples/book.pdf
-      # Every non-theorem admonition kind renders as `remark`, and a preset
-      # template that does not declare it produces TeX that will not compile.
+      # Each notice kind has its own environment, and a preset template that
+      # does not declare one produces TeX that will not compile.
       - run: |
           for preset in article book thesis journal technical-report; do
             node dist/cli.js examples/paper.crv --pdf --preset "$preset" \
