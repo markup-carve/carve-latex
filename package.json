@@ -46,7 +46,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@markup-carve/carve": "^0.1.7",
+    "@markup-carve/carve": "^0.1.10",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

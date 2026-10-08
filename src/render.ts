@@ -1,3 +1,4 @@
+import { resolve as resolveReferences } from '@markup-carve/carve';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,14 @@ export function renderAst(document: AstNode, supplied: PublishOptions = {}): Ren
   if (document.type !== 'document') throw new TypeError(`Expected a Carve document AST, got ${document.type}`);
   const metadata = readMetadata(document);
   const options = defaults({ ...metadataOptions(metadata), ...supplied });
+  // The engine's own resolution pass, rather than a second copy of its rules
+  // here. It fills a heading's `attrs.id` with the id the engine assigns - a
+  // heading written `# 1. First` takes `s-1-First`, because an id may not open
+  // with a digit - and it gives a `heading_ref` an `href` only when the name
+  // resolves. Deriving either by hand is how a renderer drifts from the
+  // engine; both were wrong here before this call, and neither is a rule worth
+  // owning twice.
+  document = resolveDocument(document);
   const context: Context = { options, diagnostics: [], footnotes: collect(document, 'footnote', 'label'),
     citations: new Set(), citationDefinitions: collect(document, 'citation_definition', 'key'),
     abbreviations: collect(document, 'abbreviation_def', 'abbr'), path: [] };
@@ -72,6 +81,22 @@ function collect(document: AstNode, type: string, key: string): Map<string, AstN
   const values = new Map<string, AstNode>();
   visit(document, (node) => { if (node.type === type && typeof node[key] === 'string') values.set(String(node[key]), node); });
   return values;
+}
+
+/**
+ * The document with names resolved, or the document unchanged.
+ *
+ * A caller may hand `renderAst` a tree it assembled itself (`--from-json`,
+ * `readAst`), and a tree the engine refuses to resolve must still render the
+ * way it did before rather than failing the whole run over a cross-reference.
+ */
+function resolveDocument(document: AstNode): AstNode {
+  try {
+    const resolved = resolveReferences(document as never) as AstNode | undefined;
+    return resolved && resolved.type === 'document' ? resolved : document;
+  } catch {
+    return document;
+  }
 }
 
 function visit(node: AstNode, callback: (node: AstNode) => void): void {
@@ -141,7 +166,21 @@ function renderInline(node: AstNode, context: Context): string {
     case 'inline_footnote': return `\\footnote{${renderChildren((node.inline as AstNode[] | undefined) ?? [], context)}}`;
     case 'citation': return citation(node, context);
     case 'citation_group': return citationGroup(node, context);
-    case 'heading_ref': return `\\cref{${safeLabel(String(node.target ?? node.id ?? plain(node)))}}`;
+    case 'heading_ref': {
+      const target = String(node.target ?? node.id ?? plain(node));
+      // No `href` means the name resolved to nothing. Names compare case
+      // exactly (carve 0.1.8), so a reference whose case differs from its
+      // target lands here, and `\cref` to a label that was never written
+      // compiles to `??` with only a LaTeX warning. The other targets render an
+      // unresolved reference as its own source text, so this does too.
+      if (!String(node.href ?? '')) {
+        diagnostic(context, node, 'crossref-unresolved',
+          `No target carries the id "${target}", so the reference is written as text. Names compare case exactly.`,
+          'degraded');
+        return escapeLatex(`</#${target}>`);
+      }
+      return `\\cref{${safeLabel(target)}}`;
+    }
     case 'caption_number':
       if (typeof node.n === 'number') return String(node.n);
       diagnostic(context, node, 'caption-number-normalized', 'A caption number outside the label position has no counter and was dropped.', 'normalized');
