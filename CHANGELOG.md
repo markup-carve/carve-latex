@@ -4,6 +4,8 @@ Notable changes to `@markup-carve/carve-latex`.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-08
+
 ### Fixed
 
 - **Cross-references resolve instead of compiling to `??`.** A heading without
