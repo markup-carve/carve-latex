@@ -1,6 +1,6 @@
 {
   "name": "@markup-carve/carve-latex",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Publication-grade Carve to LaTeX and PDF publishing",
   "type": "module",
   "bin": {
