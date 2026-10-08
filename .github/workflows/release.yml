@@ -126,6 +126,7 @@ jobs:
     needs:
       - npm-credential
       - tag
+      - release-checks
     permissions:
       # `write`, not `read`: a DRAFT release is invisible to a caller without
       # push access, so the gate below would report "no release" for a draft
@@ -248,6 +249,8 @@ jobs:
             -f tag_name="$RELEASE_TAG" -F draft=false >/dev/null
           gh api "repos/$GITHUB_REPOSITORY/releases/$id" \
             --jq 'if .draft then error("release is still a draft") else "published \(.tag_name)" end'
+    if: ${{ !cancelled() && !failure() && needs['release-checks'].result == 'success' && (needs.tag.result == 'success'
+      || (github.event_name == 'workflow_dispatch' && inputs.version == '')) }}
   tag:
     name: Create the tag
     runs-on: ubuntu-latest
