@@ -177,9 +177,18 @@ test('a caption with a colon but no number placeholder survives verbatim', () =>
   assert.match(result.value, /\\caption\{Figure: A plot\}/);
 });
 
-test('a number placeholder away from the label position is not a label', () => {
+// A number placeholder away from the label position still takes a counter: it
+// is not a LABEL, which is what the colon form makes it, but the number is
+// printed where it stands. Measured against the engine, which is the oracle
+// here - `carveToHtml` on the same source renders
+// `<figcaption>A plot 1 of values: revised</figcaption>`.
+//
+// This file asserted the number was DROPPED, and the renderer obliged with a
+// `caption-number-normalized` diagnostic. Both were wrong about the engine:
+// the resolution pass assigns the counter and the published HTML prints it.
+test('a number placeholder away from the label position still takes its counter', () => {
   const result = renderCarve('![a](p.png)\n^ A plot # of values: revised\n', { standalone: false });
-  assert.match(result.value, /\\caption\{A plot  of values: revised\}/);
+  assert.match(result.value, /\\caption\{A plot 1 of values: revised\}/);
 });
 
 test('only the first colon after the number ends the label', () => {
