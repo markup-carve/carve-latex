@@ -1,31 +1,14 @@
-name: Release packages and assets
+name: Release
 
 on:
-  workflow_call:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
     inputs:
-      publish:
-        required: true
-        type: boolean
-      tag:
-        required: true
-        type: string
       version:
-        required: true
-        type: string
-      release_tag:
-        required: true
-        type: string
-      source_sha:
-        required: true
-        type: string
-      release_id:
-        required: true
-        type: string
-      release_body:
-        required: true
-        type: string
-      notes_digest:
-        required: true
+        description: Version to publish, without v; leave empty for rehearsal
+        required: false
         type: string
 
 # Every job declares timeout-minutes so a hung step fails in minutes
@@ -39,16 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-        with:
-          ref: ${{ inputs.source_sha }}
-          fetch-depth: 0
-      - name: Expose the candidate tag locally
-        if: ${{ !inputs.publish }}
-        shell: bash
-        env:
-          CANDIDATE_TAG: ${{ inputs.tag }}
-        run: |
-          git tag "$CANDIDATE_TAG" "${{ inputs.source_sha }}"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -150,14 +123,15 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [npm-credential]
-    environment: release
+    needs:
+      - npm-credential
+      - tag
+      - release-checks
     permissions:
       # `write`, not `read`: a DRAFT release is invisible to a caller without
       # push access, so the gate below would report "no release" for a draft
       # that is sitting right there. See markup-carve/carve-wasm#80.
       contents: write
-      actions: read
     steps:
       # The notes are not the workflow's to write. A CHANGELOG entry is one or
       # two lines for a contributor, which makes poor release notes for someone
@@ -166,59 +140,39 @@ jobs:
       # Listed rather than addressed by tag: a draft's tag is not a git ref, so
       # `gh release view <tag>` can match nothing and still exit 0.
       - name: A release draft for this tag exists and has notes
+        if: (github.event_name != 'workflow_dispatch' || inputs.version != '')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           release="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
-            --jq "[.[] | select(.tag_name == \"$LANE_TAG\")] | first")"
+            --jq "[.[] | select(.tag_name == \"$RELEASE_TAG\")] | first")"
           if [ -z "$release" ]; then
-            echo "::error::no release for $LANE_TAG. Write the notes first:" \
-                 "gh release create $LANE_TAG --draft --notes-file NOTES.md"
+            echo "::error::no release for $RELEASE_TAG. Write the notes first:" \
+                 "gh release create $RELEASE_TAG --draft --notes-file NOTES.md"
             exit 1
           fi
           body="$(printf '%s' "$release" | jq -r '.body // ""' | tr -d '[:space:]')"
           [ -n "$body" ] \
-            || { echo "::error::the release for $LANE_TAG has no notes"; exit 1; }
+            || { echo "::error::the release for $RELEASE_TAG has no notes"; exit 1; }
           printf '%s' "$release" | jq -r '"draft=\(.draft) tag=\(.tag_name)"'
 
-        if: ${{ inputs.publish }}
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-          ref: ${{ inputs.source_sha }}
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Verify approval and checked tag before publishing
-        working-directory: ${{ github.workspace }}
-        if: ${{ inputs.publish }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          RELEASE_SHA: ${{ inputs.source_sha }}
-          RELEASE_NOTES_DIGEST: ${{ inputs.notes_digest }}
-        run: python .github/scripts/release-lane.py permit
-      - name: Expose the candidate tag locally
-        if: ${{ !inputs.publish }}
-        shell: bash
-        env:
-          CANDIDATE_TAG: ${{ inputs.tag }}
-        run: |
-          git tag "$CANDIDATE_TAG" "${{ inputs.source_sha }}"
       - name: The release tag is on main
+        if: (github.event_name != 'workflow_dispatch' || inputs.version != '')
         run: |
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
-            || { echo "::error::$LANE_TAG is not on the main line"; exit 1; }
+            || { echo "::error::$RELEASE_TAG is not on the main line"; exit 1; }
 
       - name: The version surfaces agree
         run: |
           version="$(node -p 'require("./package.json").version')"
-          if [ "${{ 'push' }}" != "workflow_dispatch" ]; then
-            [ "$version" = "$LANE_TAG" ] \
-              || { echo "::error::package.json is $version, tag is $LANE_TAG"; exit 1; }
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            [ "$version" = "$RELEASE_TAG" ] \
+              || { echo "::error::package.json is $version, tag is $RELEASE_TAG"; exit 1; }
           fi
           grep -qE "^## \[?${version//./\\.}\]? - " CHANGELOG.md \
             || { echo "::error::CHANGELOG.md has no dated section for $version"; exit 1; }
@@ -274,26 +228,167 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ "$LANE_PUBLISH" = true ]; then
-            if [ "${{ 'push' }}" = "workflow_dispatch" ]; then
-              npm publish --dry-run --access public
-              echo "::notice::rehearsal - nothing was published"
-            else
-              npm publish --access public
-            fi
-          else
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "$RELEASE_VERSION" ]; then
             npm publish --dry-run --access public
+            echo "::notice::rehearsal - nothing was published"
+          else
+            npm publish --access public
           fi
 
       # Publish the draft a human wrote. Addressed by ID with tag_name sent,
       # because omitting tag_name on a draft clears the tag to `untagged-...`.
-        shell: bash
-permissions:
-  contents: write
-  actions: read
-  id-token: write
+      - name: Publish the release notes written for this tag
+        if: (github.event_name != 'workflow_dispatch' || inputs.version != '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq "[.[] | select(.tag_name == \"$RELEASE_TAG\")] | first | .id // empty")"
+          [ -n "$id" ] || { echo "::error::the release for $RELEASE_TAG vanished"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id" -X PATCH \
+            -f tag_name="$RELEASE_TAG" -F draft=false >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id" \
+            --jq 'if .draft then error("release is still a draft") else "published \(.tag_name)" end'
+    if: ${{ !cancelled() && !failure() && needs['release-checks'].result == 'success' && (needs.tag.result == 'success'
+      || (github.event_name == 'workflow_dispatch' && inputs.version == '')) }}
+  tag:
+    name: Create the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - npm-credential
+      - release-checks
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create the tag unless it already exists
+        run: |
+          set -euo pipefail
+          candidate="${RELEASE_TAG#v}"
+          [[ "$candidate" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Version must be X.Y.Z"; exit 1; }
+          version="$(node -p 'require("./package.json").version')"
+          [ "$version" = "$candidate" ] || { echo "::error::Package version $version differs from $RELEASE_TAG"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            remote="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}" | tail -1 | cut -f1)"
+            [ "$remote" = "$GITHUB_SHA" ] || { echo "::error::Existing tag points to another commit"; exit 1; }
+            echo "$RELEASE_TAG is already on the remote; creating nothing."
+            exit 0
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "::error::this run is on tag $RELEASE_TAG, which is not on the remote."
+            exit 1
+          fi
+          # Re-checked under the approval: a tag can appear while a run waits.
+          git tag "$RELEASE_TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$RELEASE_TAG"
+          echo "tagged $RELEASE_TAG at $GITHUB_SHA"
+    if: github.ref_type == 'tag' || inputs.version != ''
+  release-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs:
+      - npm-credential
+    permissions:
+      # `write`, not `read`: a DRAFT release is invisible to a caller without
+      # push access, so the gate below would report "no release" for a draft
+      # that is sitting right there. See markup-carve/carve-wasm#80.
+      contents: write
+    steps:
+      # The notes are not the workflow's to write. A CHANGELOG entry is one or
+      # two lines for a contributor, which makes poor release notes for someone
+      # deciding whether to upgrade, so a human writes the draft first.
+      #
+      # Listed rather than addressed by tag: a draft's tag is not a git ref, so
+      # `gh release view <tag>` can match nothing and still exit 0.
+      - name: A release draft for this tag exists and has notes
+        if: (github.event_name != 'workflow_dispatch' || inputs.version != '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq "[.[] | select(.tag_name == \"$RELEASE_TAG\")] | first")"
+          if [ -z "$release" ]; then
+            echo "::error::no release for $RELEASE_TAG. Write the notes first:" \
+                 "gh release create $RELEASE_TAG --draft --notes-file NOTES.md"
+            exit 1
+          fi
+          body="$(printf '%s' "$release" | jq -r '.body // ""' | tr -d '[:space:]')"
+          [ -n "$body" ] \
+            || { echo "::error::the release for $RELEASE_TAG has no notes"; exit 1; }
+          printf '%s' "$release" | jq -r '"draft=\(.draft) tag=\(.tag_name)"'
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: The release tag is on main
+        if: (github.event_name != 'workflow_dispatch' || inputs.version != '')
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::$RELEASE_TAG is not on the main line"; exit 1; }
+
+      - name: The version surfaces agree
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            [ "$version" = "$RELEASE_TAG" ] \
+              || { echo "::error::package.json is $version, tag is $RELEASE_TAG"; exit 1; }
+          fi
+          grep -qE "^## \[?${version//./\\.}\]? - " CHANGELOG.md \
+            || { echo "::error::CHANGELOG.md has no dated section for $version"; exit 1; }
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # A git dependency in runtime `dependencies` ships to every consumer, who
+      # then needs git and GitHub reachability and has no registry tarball to
+      # check an integrity hash against.
+      - name: No dependency is installed over git
+        run: |
+          node -e '
+            const deps = require("./package.json").dependencies ?? {};
+            const git = Object.entries(deps).filter(([, r]) => /^(git|github:|[^@/]+\/[^@/]+$)/.test(r));
+            if (git.length) {
+              console.log(`::error::git dependency: ${git.map(([n, r]) => `${n}@${r}`).join(", ")}`);
+              process.exit(1);
+            }
+          '
+
+      - name: The npm credential authenticates
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          [ -n "$NPM_TOKEN" ] \
+            || { echo "::error::NPM_TOKEN is not configured"; exit 1; }
+          code="$(curl -sS -o /tmp/npm-who.json -w '%{http_code}' \
+            -H "Authorization: Bearer $NPM_TOKEN" \
+            https://registry.npmjs.org/-/whoami)"
+          [ "$code" = 200 ] \
+            || { echo "::error::NPM_TOKEN does not authenticate (HTTP $code)"; exit 1; }
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+      # The package is useless without the templates and resources it loads at
+      # run time, and `files` is easy to narrow by accident.
+      - name: The package carries its templates and resources
+        run: |
+          tarball="$(npm pack --silent)"
+          listing="$(tar -tzf "$tarball")"
+          for path in package/dist/cli.js package/templates package/resources; do
+            printf '%s\n' "$listing" | grep -q "^$path" \
+              || { echo "::error::$tarball is missing $path"; exit 1; }
+          done
+
+    name: Verify release before approval
 env:
-  LANE_TAG: ${{ inputs.tag }}
-  LANE_REF: ${{ format('refs/tags/{0}', inputs.tag) }}
-  LANE_REF_TYPE: tag
-  LANE_PUBLISH: ${{ inputs.publish }}
+  RELEASE_TAG: ${{ inputs.version != '' && inputs.version || github.ref_name }}
+  RELEASE_VERSION: ${{ inputs.version }}
