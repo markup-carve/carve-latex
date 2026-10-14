@@ -209,3 +209,38 @@ test('resolved spans still merge cells', () => {
   const result = renderCarve('| a | < |\n| ^ | ^ |\n| x | y |\n');
   assert.match(result.value, /\\multicolumn\{2\}\{l\}\{\\multirow\{2\}\{\*\}\{a\}\} \\\\\n &  \\\\\nx & y \\\\/);
 });
+
+const codes = (result) => result.report.diagnostics.map((item) => item.code);
+
+test('a toc placement prints the table of contents where it stands, not also at the template slot', () => {
+  const result = renderCarve('# Intro\n\n::: toc\n:::\n\nText.\n', { tableOfContents: true });
+  assert.equal(result.value.match(/\\tableofcontents/g)?.length, 1);
+  assert.ok(result.value.indexOf('\\tableofcontents') > result.value.indexOf('\\section{Intro}'));
+  assert.ok(!codes(result).some((code) => code.startsWith('unsupported')));
+});
+
+test('a footnotes placement adds nothing and is reported as a block, not an inline', () => {
+  const result = renderCarve('Text[^a].\n\n[^a]: A note.\n\n::: footnotes\n:::\n', { standalone: false });
+  assert.match(result.value, /\\footnote\{A note\.\}/);
+  assert.deepEqual(codes(result), ['directive-normalized']);
+});
+
+test('a generated-content placement renders the blocks written inside it', () => {
+  const result = renderCarve('::: glossary\nSee also the index.\n:::\n', { standalone: false });
+  assert.match(result.value, /See also the index\./);
+  assert.deepEqual(codes(result), ['directive-normalized']);
+});
+
+test('a block extension renders its fallback, or reports the loss as a block', () => {
+  const paragraph = { type: 'paragraph', children: [{ type: 'text', value: 'Fallback text.' }] };
+  const withFallback = renderAst({ type: 'document', children: [
+    { type: 'block_extension', name: 'chart', payload: { format: 'json', value: '{}' }, fallback: paragraph },
+  ] }, { standalone: false });
+  assert.match(withFallback.value, /Fallback text\./);
+  assert.deepEqual(codes(withFallback), ['block-extension-fallback-rendered']);
+  const bare = renderAst({ type: 'document', children: [
+    { type: 'block_extension', name: 'chart', payload: { format: 'json', value: '{"a":1}' } },
+  ] }, { standalone: false });
+  assert.match(bare.value, /\\begin\{carvecode\}/);
+  assert.deepEqual(codes(bare), ['block-extension-degraded']);
+});

@@ -20,7 +20,8 @@ type Context = {
 
 const BLOCK_TYPES = new Set(['document', 'heading', 'paragraph', 'block_quote', 'list', 'definition_list',
   'code_block', 'table', 'figure', 'figure_group', 'admonition', 'div', 'line_block', 'raw_block',
-  'thematic_break', 'comment', 'footnote', 'link_reference_definition', 'abbreviation_def', 'citation_definition']);
+  'thematic_break', 'comment', 'footnote', 'link_reference_definition', 'abbreviation_def', 'citation_definition',
+  'directive', 'block_extension']);
 
 export function renderAst(document: AstNode, supplied: PublishOptions = {}): RenderResult {
   if (document.type !== 'document') throw new TypeError(`Expected a Carve document AST, got ${document.type}`);
@@ -138,6 +139,8 @@ function renderBlock(node: AstNode, context: Context): string {
     case 'raw_block': return raw(node, context, true);
     case 'thematic_break': return '\\par\\noindent\\rule{\\linewidth}{0.4pt}\\par';
     case 'comment': diagnostic(context, node, 'comment-dropped', 'Comments are not printed.', 'dropped'); return '';
+    case 'directive': return directive(node, context);
+    case 'block_extension': return blockExtension(node, context);
     default:
       if (!BLOCK_TYPES.has(node.type)) return renderInline(node, context);
       diagnostic(context, node, 'unsupported-block', `Unsupported block ${node.type} was preserved as readable text.`, 'degraded');
@@ -446,6 +449,46 @@ function div(node: AstNode, context: Context): string {
   if (['theorem', 'lemma', 'proposition', 'corollary', 'definition', 'proof', 'remark'].includes(name)) return environment(name, renderChildren(node.children ?? [], context, true));
   diagnostic(context, node, 'container-flattened', `Container ${name || 'div'} was flattened without its visual wrapper.`, 'degraded');
   return renderChildren(node.children ?? [], context, true);
+}
+
+// A generated-content placement (`::: toc`, `::: footnotes`, ...). Footnotes
+// already print at their references, and the other kinds at the template's slot.
+function directive(node: AstNode, context: Context): string {
+  const kind = String(node.kind ?? '').toLowerCase();
+  if (Array.isArray(node.title) && node.title.length > 0) {
+    diagnostic(context, node, 'directive-title-dropped', `The ${kind} placement cannot carry a title.`, 'dropped');
+  }
+  const body = (node.children ?? []).length > 0 ? renderChildren(node.children ?? [], context, true) : '';
+  if (kind === 'toc') {
+    // Printed here instead of at the template's slot, never twice.
+    context.options.tableOfContents = false;
+    return `\\tableofcontents\n${body}`.trim();
+  }
+  if (kind === 'footnotes') {
+    diagnostic(context, node, 'directive-normalized', 'Footnotes print at their references, so the footnotes placement adds nothing.', 'normalized');
+  } else {
+    diagnostic(context, node, 'directive-normalized', `The ${kind} placement is not honored; the template places generated ${kind} content.`, 'normalized');
+  }
+  return body;
+}
+
+// An extension block this renderer does not know: its fallback is the content
+// the extension promised every renderer that does not implement it.
+function blockExtension(node: AstNode, context: Context): string {
+  const name = String(node.name ?? 'unknown');
+  const fallback = node.fallback as AstNode | undefined;
+  if (fallback && typeof fallback === 'object' && typeof fallback.type === 'string') {
+    diagnostic(context, node, 'block-extension-fallback-rendered', `Block extension ${name} rendered its fallback.`, 'degraded');
+    return renderChildren([fallback], context, true).trim();
+  }
+  const payload = node.payload as { value?: unknown } | undefined;
+  const value = typeof payload?.value === 'string' ? payload.value : '';
+  if (!value) {
+    diagnostic(context, node, 'block-extension-dropped', `Block extension ${name} has no fallback and was dropped.`, 'dropped');
+    return '';
+  }
+  diagnostic(context, node, 'block-extension-degraded', `Block extension ${name} has no fallback; its payload is shown as text.`, 'degraded');
+  return literalBlock(value);
 }
 
 function raw(node: AstNode, context: Context, block: boolean): string {
