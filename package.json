@@ -1,6 +1,6 @@
 {
   "name": "@markup-carve/carve-latex",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Publication-grade Carve to LaTeX and PDF publishing",
   "type": "module",
   "bin": {
@@ -46,7 +46,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@markup-carve/carve": "^0.1.10",
+    "@markup-carve/carve": "^0.1.11",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

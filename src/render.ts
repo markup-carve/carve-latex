@@ -187,6 +187,8 @@ function renderInline(node: AstNode, context: Context): string {
       return '';
     case 'hard_break': return '\\\\';
     case 'soft_break': return '\n';
+    // A table continuation-line join renders as one space (AST contract 1.1).
+    case 'cell_wrap': return ' ';
     case 'raw_inline': return raw(node, context, false);
     case 'comment': case 'critic_comment': diagnostic(context, node, 'comment-dropped', 'Comments are not printed.', 'dropped'); return '';
     case 'mention': return `@${escapeLatex(String(node.user ?? node.name ?? ''))}`;
@@ -329,15 +331,16 @@ function table(node: AstNode, context: Context): string {
   });
   while (columnSpecs.length < columns) columnSpecs.push(alignments[columnSpecs.length] ?? 'l');
   while (alignments.length < columns) alignments.push('l');
+  const spans = resolveSpans(rows);
   const lines = rows.map((row, rowIndex) => {
     const cells = row.cells ?? row.children ?? [];
     const values: string[] = [];
     for (let column = 0; column < cells.length; column += 1) {
       const cell = cells[column]!;
-      if (cell.span === 'rowspan') { values.push(''); continue; }
-      if (cell.span === 'colspan') continue;
-      let colspan = 1; while (cells[column + colspan]?.span === 'colspan') colspan += 1;
-      let rowspan = 1; while ((rows[rowIndex + rowspan]?.cells ?? rows[rowIndex + rowspan]?.children ?? [])[column]?.span === 'rowspan') rowspan += 1;
+      const span = spans[rowIndex]![column]!;
+      if (span.covered === 'row') { values.push(''); continue; }
+      if (span.covered === 'column') continue;
+      const { colspan, rowspan } = span;
       let rendered = renderChildren(cell.children ?? [], context);
       if (rowspan > 1) rendered = `\\multirow{${rowspan}}{*}{${rendered}}`;
       if (colspan > 1) rendered = `\\multicolumn{${colspan}}{${alignments[column]}}{${rendered}}`;
@@ -352,6 +355,37 @@ function table(node: AstNode, context: Context): string {
   const note = typeof node.attrs?.note === 'string' ? `\n\\multicolumn{${columns}}{l}{\\footnotesize ${escapeLatex(node.attrs.note)}} \\\\` : '';
   const renderedTable = `\\begin{longtable}{${columnSpecs.join('')}}\n${captionText}${repeatedHead}${note}\n\\bottomrule\n\\end{longtable}`;
   return node.attrs?.landscape === true ? environment('landscape', renderedTable) : renderedTable;
+}
+
+type SpanSlot = { rowspan: number; colspan: number; covered?: 'row' | 'column' };
+
+// The PART 9 §13 T5 walk as carve-js runs it: a marker with no origin, or whose span would cover another cell, stays a cell.
+function resolveSpans(rows: AstNode[]): SpanSlot[][] {
+  const grid = rows.map((row) => (row.cells ?? row.children ?? []).map((): SpanSlot => ({ rowspan: 1, colspan: 1 })));
+  const cover: Array<Array<[number, number] | undefined>> = [];
+  rows.forEach((row, r) => {
+    const cells = row.cells ?? row.children ?? [];
+    const own: Array<[number, number] | undefined> = (cover[r] = []);
+    cells.forEach((cell, c) => {
+      const slot = grid[r]![c]!;
+      if (slot.covered) return;
+      if (cell.span === 'colspan' && c > 0) {
+        const at = own[c - 1];
+        if (at && at[0] === r) { grid[r]![at[1]]!.colspan += 1; slot.covered = 'column'; own[c] = at; return; }
+      } else if (cell.span === 'rowspan' && r > 0) {
+        const at = cover[r - 1]?.[c];
+        const origin = at && at[1] === c ? grid[at[0]]![at[1]]! : undefined;
+        const stripFree = origin !== undefined && cells.slice(c + 1, c + origin.colspan).every((next, k) => grid[r]![c + 1 + k]!.covered === undefined && next.span !== undefined);
+        if (origin && stripFree) {
+          origin.rowspan += 1;
+          for (let k = c; k < c + origin.colspan; k += 1) { own[k] = at; if (grid[r]![k]) grid[r]![k]!.covered = 'row'; }
+          return;
+        }
+      }
+      own[c] = [r, c];
+    });
+  });
+  return grid;
 }
 
 function figure(node: AstNode, context: Context): string {

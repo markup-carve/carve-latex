@@ -193,3 +193,19 @@ test('frontmatter cannot cross the raw-LaTeX trust boundary', () => {
   assert.doesNotMatch(result.value, /^\\input/m);
   assert.equal(result.report.diagnostics[0].code, 'raw-latex-disabled');
 });
+
+test('a table continuation join (cell_wrap) renders as one space', () => {
+  const result = renderCarve('| a | x |\n+ b | y |\n');
+  assert.match(result.value, /a b & x y \\\\/);
+  assert.deepEqual(result.report.diagnostics, []);
+});
+
+test('a blocked span marker stays a cell and keeps its continuation text', () => {
+  const result = renderCarve('| a | b |\n| < | c |\n+ d | e |\n');
+  assert.match(result.value, /a & b \\\\\nd & c e \\\\/);
+});
+
+test('resolved spans still merge cells', () => {
+  const result = renderCarve('| a | < |\n| ^ | ^ |\n| x | y |\n');
+  assert.match(result.value, /\\multicolumn\{2\}\{l\}\{\\multirow\{2\}\{\*\}\{a\}\} \\\\\n &  \\\\\nx & y \\\\/);
+});
