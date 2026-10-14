@@ -212,7 +212,7 @@ test('resolved spans still merge cells', () => {
 
 const codes = (result) => result.report.diagnostics.map((item) => item.code);
 
-test('a toc placement prints the table of contents where it stands, once', () => {
+test('a toc placement prints the table of contents where it stands, not also at the template slot', () => {
   const result = renderCarve('# Intro\n\n::: toc\n:::\n\nText.\n', { tableOfContents: true });
   assert.equal(result.value.match(/\\tableofcontents/g)?.length, 1);
   assert.ok(result.value.indexOf('\\tableofcontents') > result.value.indexOf('\\section{Intro}'));
