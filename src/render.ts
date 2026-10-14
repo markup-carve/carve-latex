@@ -187,6 +187,8 @@ function renderInline(node: AstNode, context: Context): string {
       return '';
     case 'hard_break': return '\\\\';
     case 'soft_break': return '\n';
+    // A table continuation-line join renders as one space (AST contract 1.1).
+    case 'cell_wrap': return ' ';
     case 'raw_inline': return raw(node, context, false);
     case 'comment': case 'critic_comment': diagnostic(context, node, 'comment-dropped', 'Comments are not printed.', 'dropped'); return '';
     case 'mention': return `@${escapeLatex(String(node.user ?? node.name ?? ''))}`;
