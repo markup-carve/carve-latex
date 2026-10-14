@@ -21,3 +21,8 @@ test('CLI accepts canonical AST JSON', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, 'AST\n');
 });
+
+test('CLI --version prints the package version', () => {
+  const result = spawnSync(process.execPath, ['dist/cli.js', '--version'], { encoding: 'utf8' });
+  assert.equal(result.stdout.trim(), JSON.parse(readFileSync('package.json', 'utf8')).version);
+});

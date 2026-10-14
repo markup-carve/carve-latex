@@ -7,7 +7,7 @@ import type { DocumentClass, PublishOptions } from './types.js';
 
 const argv = process.argv.slice(2);
 if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) usage(0);
-if (argv.includes('--version')) { console.log('0.1.0'); process.exit(0); }
+if (argv.includes('--version')) { console.log((JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version); process.exit(0); }
 
 const valueFlags = new Set(['--output', '-o', '--report', '--class', '--template', '--title', '--author', '--lang',
   '--margin', '--bibliography', '--cite-style', '--source-date-epoch', '--project', '--bundle', '--sarif', '--fail-on', '--preset', '--csl', '--doi']);

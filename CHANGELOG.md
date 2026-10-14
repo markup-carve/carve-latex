@@ -4,6 +4,18 @@ Notable changes to `@markup-carve/carve-latex`.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-14
+
+### Fixed
+
+- A table continuation line renders as a space between the joined lines, matching carve 0.1.11's `cell_wrap` node (#26).
+- A `^` or `<` span marker that cannot span stays a cell of its own, keeping its continuation text. It used to be dropped, which shifted the rest of the row one column left (#26).
+- `carve-latex --version` prints the installed version instead of `0.1.0` (#26).
+
+### Changed
+
+- Requires `@markup-carve/carve` 0.1.11 or later (#26).
+
 ## [0.1.1] - 2026-10-08
 
 ### Fixed
