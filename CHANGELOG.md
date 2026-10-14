@@ -11,8 +11,8 @@ Notable changes to `@markup-carve/carve-latex`.
 - A table continuation line renders as a space between the joined lines, matching carve 0.1.11's `cell_wrap` node (#26).
 - A `^` or `<` span marker that cannot span stays a cell of its own, keeping its continuation text. It used to be dropped, which shifted the rest of the row one column left (#26).
 - `carve-latex --version` prints the installed version instead of `0.1.0` (#26).
-- A `::: toc` placement prints `\tableofcontents` where it stands, once, instead of rendering nothing. `::: footnotes` and the other placements render the blocks inside them and report `directive-normalized`; none is reported as an unsupported inline any more (#27, #PRNUM).
-- A block extension renders its fallback (`block-extension-fallback-rendered`), or its payload as text when it has none (#27, #PRNUM).
+- A `::: toc` placement prints `\tableofcontents` where it stands, once, instead of rendering nothing. `::: footnotes` and the other placements render the blocks inside them and report `directive-normalized`; none is reported as an unsupported inline any more (#27, #28).
+- A block extension renders its fallback (`block-extension-fallback-rendered`), or its payload as text when it has none (#27, #28).
 
 ### Changed
 
