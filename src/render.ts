@@ -207,6 +207,8 @@ function renderInline(node: AstNode, context: Context): string {
       return context.options.glossaries && context.abbreviations.has(abbr) ? `\\gls{${safeLabel(abbr)}}` : `\\textsc{${escapeLatex(abbr)}}`;
     }
     case 'span': case 'inline_extension': return content();
+    case 'small_caps': return command('textsc', content());
+    case 'ruby': return ruby(node, context);
     case 'smart_punctuation': return escapeLatex(String(node.value ?? ''));
     case 'non_breaking_space': return '~';
     // Both halves are inline arrays, and an empty one is `[]`, so it must not
@@ -223,6 +225,17 @@ function renderInline(node: AstNode, context: Context): string {
       diagnostic(context, node, 'unsupported-inline', `Unsupported inline ${node.type} was flattened.`, 'degraded');
       return content() || escapeLatex(String(node.value ?? ''));
   }
+}
+
+// A kernel-only stack, so the preamble needs nothing: the CTAN `ruby` package
+// belongs to the CJK bundle and does not run under the LuaLaTeX templates.
+function ruby(node: AstNode, context: Context): string {
+  const pairs = (node.pairs as Array<{ base?: AstNode[]; annotation?: AstNode[] }> | undefined) ?? [];
+  return pairs.map((pair) => {
+    const base = renderChildren(pair.base ?? [], context);
+    const annotation = renderChildren(pair.annotation ?? [], context);
+    return annotation ? `\\shortstack{{\\scriptsize ${annotation}}\\\\${base}}` : base;
+  }).join('');
 }
 
 function heading(node: AstNode, context: Context): string {
