@@ -13,6 +13,7 @@ Notable changes to `@markup-carve/carve-latex`.
 - `carve-latex --version` prints the installed version instead of `0.1.0` (#26).
 - A `::: toc` placement prints `\tableofcontents` where it stands instead of rendering nothing, and the template's own table of contents is then left out. `::: footnotes` and the other placements render the blocks inside them and report `directive-normalized`; none is reported as an unsupported inline any more (#27, #28).
 - A block extension renders its fallback (`block-extension-fallback-rendered`), or its payload as text when it has none (#27, #28).
+- A `small_caps` node renders as `\textsc{...}` and keeps its marks. A `ruby` node stacks each annotation over its base, where it used to drop the text. Neither is reported as an unsupported inline any more (#27).
 
 ### Changed
 

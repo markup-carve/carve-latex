@@ -1,0 +1,12 @@
+{"type":"document","srcByteLength":0,"children":[
+ {"type":"paragraph","children":[
+  {"type":"text","value":"Set in "},
+  {"type":"small_caps","children":[{"type":"text","value":"Small Caps "},{"type":"emphasis","children":[{"type":"text","value":"with emphasis"}]}]},
+  {"type":"text","value":" and read as "},
+  {"type":"ruby","pairs":[
+   {"base":[{"type":"text","value":"Base"}],"annotation":[{"type":"text","value":"reading"}]},
+   {"base":[{"type":"strong","children":[{"type":"text","value":"Two"}]}],"annotation":[]}
+  ]},
+  {"type":"text","value":"."}
+ ]}
+]}

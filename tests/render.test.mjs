@@ -244,3 +244,26 @@ test('a block extension renders its fallback, or reports the loss as a block', (
   assert.match(bare.value, /\\begin\{carvecode\}/);
   assert.deepEqual(codes(bare), ['block-extension-degraded']);
 });
+
+const inline = (...children) => renderAst({ type: 'document', children: [paragraph(...children)] }, { standalone: false });
+
+test('small caps render as textsc and keep nested marks', () => {
+  const result = inline({ type: 'small_caps', children: [text('Carve '), { type: 'emphasis', children: [text('A&B')] }] });
+  assert.equal(result.value.trim(), '\\textsc{Carve \\emph{A\\&B}}');
+  assert.deepEqual(codes(result), []);
+});
+
+test('ruby stacks each annotation over its own base', () => {
+  const result = inline({ type: 'ruby', pairs: [
+    { base: [text('漢')], annotation: [text('kan')] },
+    { base: [{ type: 'strong', children: [text('字')] }], annotation: [{ type: 'emphasis', children: [text('ji')] }] },
+  ] });
+  assert.equal(result.value.trim(), '\\shortstack{{\\scriptsize kan}\\\\漢}\\shortstack{{\\scriptsize \\emph{ji}}\\\\\\textbf{字}}');
+  assert.deepEqual(codes(result), []);
+});
+
+test('a ruby pair with an empty annotation prints its base alone', () => {
+  const result = inline({ type: 'ruby', pairs: [{ base: [text('字')], annotation: [] }, { base: [text('X')], annotation: [text('x')] }] });
+  assert.equal(result.value.trim(), '字\\shortstack{{\\scriptsize x}\\\\X}');
+  assert.deepEqual(codes(result), []);
+});

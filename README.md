@@ -83,6 +83,7 @@ Supported document classes are `article`, `report`, `book`, and `thesis`. The bu
 - ordered, unordered, task and definition lists
 - injection-safe syntax-highlighted code blocks with compact language labels
 - footnotes and inline footnotes
+- small caps (`\textsc`) and ruby annotations stacked over their base text, for AST JSON input
 - table of contents, indexes and glossaries
 - abstracts, keywords, dedications, acknowledgements, epigraphs, appendices, and lists of figures/tables
 - article, report, book and thesis output
