@@ -82,6 +82,7 @@ Supported document classes are `article`, `report`, `book`, and `thesis`. The bu
 - multipage tables with captions, alignment, widths, repeated heads, and row/column spans
 - ordered, unordered, task and definition lists
 - injection-safe syntax-highlighted code blocks with compact language labels
+- CSV and TSV fences highlight separators and quoted fields, including doubled quotes
 - footnotes and inline footnotes
 - small caps (`\textsc`) and ruby annotations stacked over their base text, for AST JSON input
 - table of contents, indexes and glossaries

@@ -293,6 +293,7 @@ function codeBlock(node: AstNode, context: Context): string {
 }
 
 function highlightCode(value: string, language: string): string {
+  if (language === 'csv' || language === 'tsv') return highlightDelimited(value, language === 'csv' ? ',' : '\t');
   const supported = new Set(['javascript', 'js', 'typescript', 'ts', 'rust', 'python', 'py', 'java', 'c', 'cpp', 'css', 'html', 'xml', 'json', 'bash', 'sh', 'sql']);
   if (!supported.has(language)) return encodeLiteralBlock(value);
   const keywords = new Set(['as', 'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'def', 'do', 'else', 'enum', 'export', 'false', 'fn', 'for', 'from', 'function', 'if', 'impl', 'import', 'in', 'interface', 'let', 'match', 'mod', 'new', 'null', 'pub', 'return', 'self', 'static', 'struct', 'super', 'switch', 'this', 'throw', 'trait', 'true', 'try', 'type', 'use', 'var', 'void', 'where', 'while', 'yield']);
@@ -307,6 +308,45 @@ function highlightCode(value: string, language: string): string {
       return encoded;
     }).join('');
   }).join('\\par\n');
+}
+
+function highlightDelimited(value: string, separator: string): string {
+  const parts: string[] = [];
+  let start = 0;
+  let fieldStart = true;
+  for (let i = 0; i < value.length;) {
+    if (fieldStart && value[i] === '"') {
+      if (start < i) parts.push(encodeLiteralBlock(value.slice(start, i)));
+      const quotedStart = i;
+      i += 1;
+      while (i < value.length) {
+        if (value[i] !== '"') { i += 1; continue; }
+        if (value[i + 1] === '"') {
+          i += 2;
+          continue;
+        }
+        i += 1;
+        break;
+      }
+      parts.push(`\\textcolor{carvestring}{${encodeLiteralBlock(value.slice(quotedStart, i))}}`);
+      start = i;
+      fieldStart = false;
+      continue;
+    }
+    if (value[i] === separator) {
+      if (start < i) parts.push(encodeLiteralBlock(value.slice(start, i)));
+      parts.push(`\\textcolor{carvepunctuation}{${encodeLiteralBlock(separator)}}`);
+      i += 1;
+      start = i;
+      fieldStart = true;
+      continue;
+    }
+    if (value[i] === '\n') fieldStart = true;
+    else if (fieldStart) fieldStart = false;
+    i += 1;
+  }
+  if (start < value.length) parts.push(encodeLiteralBlock(value.slice(start)));
+  return parts.join('');
 }
 
 // `^ Figure #: A plot` asks the host to number the caption, and \caption
