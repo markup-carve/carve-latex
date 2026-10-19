@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { renderAst, renderCarve } from '../dist/index.js';
+import * as templateModule from '../dist/template.js';
 
 const text = (value) => ({ type: 'text', value });
 const paragraph = (...children) => ({ type: 'paragraph', children });
@@ -206,6 +207,14 @@ test('parsed CSV fences use the delimited highlighter', () => {
   assert.equal((rendered.match(/carvepunctuation/g) ?? []).length, 6);
   assert.equal((rendered.match(/carvestring/g) ?? []).length, 2);
   assert.ok((rendered.match(/carvevalue/g) ?? []).length >= 7);
+});
+
+test('the separator color is a red-family hue distinct from the comment grey', () => {
+  const { DEFAULT_TEMPLATE } = templateModule;
+  const rgb = (name) => DEFAULT_TEMPLATE.match(new RegExp(`definecolor\\{${name}\\}\\{RGB\\}\\{(\\d+),(\\d+),(\\d+)\\}`)).slice(1).map(Number);
+  const [r, g, b] = rgb('carvepunctuation');
+  assert.ok(r > 150 && r > g + 80 && r > b + 80, `carvepunctuation is ${r},${g},${b}`);
+  assert.notDeepEqual(rgb('carvepunctuation'), rgb('carvecomment'));
 });
 
 test('keeps executable TeX inert across code, raw blocks, math, and URLs', () => {
