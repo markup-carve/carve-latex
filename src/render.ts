@@ -312,40 +312,41 @@ function highlightCode(value: string, language: string): string {
 
 function highlightDelimited(value: string, separator: string): string {
   const parts: string[] = [];
-  let start = 0;
-  let fieldStart = true;
-  for (let i = 0; i < value.length;) {
-    if (fieldStart && value[i] === '"') {
-      if (start < i) parts.push(encodeLiteralBlock(value.slice(start, i)));
-      const quotedStart = i;
+  let header = true;
+  const field = (text: string, color: string) => {
+    if (!text) return;
+    const colored = `\\textcolor{${color}}{${encodeLiteralBlock(text)}}`;
+    parts.push(header ? `\\textbf{${colored}}` : colored);
+  };
+  let i = 0;
+  while (i < value.length) {
+    const ch = value[i];
+    if (ch === separator) {
+      field(ch, 'carvepunctuation');
+      i += 1;
+      continue;
+    }
+    if (ch === '\n') {
+      parts.push(encodeLiteralBlock(ch));
+      header = false;
+      i += 1;
+      continue;
+    }
+    const start = i;
+    let color = 'carvevalue';
+    if (ch === '"') {
+      color = 'carvestring';
       i += 1;
       while (i < value.length) {
         if (value[i] !== '"') { i += 1; continue; }
-        if (value[i + 1] === '"') {
-          i += 2;
-          continue;
-        }
+        if (value[i + 1] === '"') { i += 2; continue; }
         i += 1;
         break;
       }
-      parts.push(`\\textcolor{carvestring}{${encodeLiteralBlock(value.slice(quotedStart, i))}}`);
-      start = i;
-      fieldStart = false;
-      continue;
     }
-    if (value[i] === separator) {
-      if (start < i) parts.push(encodeLiteralBlock(value.slice(start, i)));
-      parts.push(`\\textcolor{carvepunctuation}{${encodeLiteralBlock(separator)}}`);
-      i += 1;
-      start = i;
-      fieldStart = true;
-      continue;
-    }
-    if (value[i] === '\n') fieldStart = true;
-    else if (fieldStart) fieldStart = false;
-    i += 1;
+    while (i < value.length && value[i] !== separator && value[i] !== '\n') i += 1;
+    field(value.slice(start, i), color);
   }
-  if (start < value.length) parts.push(encodeLiteralBlock(value.slice(start)));
   return parts.join('');
 }
 
