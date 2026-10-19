@@ -170,15 +170,15 @@ test('CSV and TSV fences highlight delimited fields', () => {
   };
   const encoded = (value) => [...value].map((character) => character === '\n' ? '\\par\n' : character === '\t' ? '\\char32{}\\char32{}\\char32{}\\char32{}' : `\\char"${character.codePointAt(0).toString(16).toUpperCase()}{}`).join('');
   const bold = (inner, header) => header ? `\\textbf{${inner}}` : inner;
-  const separator = (character, header = false) => bold(`\\textcolor{carvepunctuation}{${encoded(character)}}`, header);
+  const separator = (character, header = false) => bold(`\\textcolor{carveseparator}{${encoded(character)}}`, header);
   const string = (value, header = false) => bold(`\\textcolor{carvestring}{${encoded(value)}}`, header);
   const value = (text, header = false) => bold(`\\textcolor{carvevalue}{${encoded(text)}}`, header);
   const stripTyped = (rendered) => rendered
     .replace(/\\textbf\{/g, '{')
-    .replace(/\\textcolor\{carve(?:value|string|punctuation)\}\{(?:\\char"[0-9A-F]+\{\}|\\char32\{\}|\\par\n)*\}/g, '')
+    .replace(/\\textcolor\{carve(?:value|string|separator)\}\{(?:\\char"[0-9A-F]+\{\}|\\char32\{\}|\\par\n)*\}/g, '')
     .replace(/\\par\n/g, '').replace(/[{}]/g, '');
   const csv = body('csv', 'Plan,Seats,Price per month\nStarter,1,"$0"\nTeam,10,"$49, billed yearly"');
-  assert.equal((csv.match(/carvepunctuation/g) ?? []).length, 6);
+  assert.equal((csv.match(/carveseparator/g) ?? []).length, 6);
   assert.ok(csv.startsWith(`${value('Plan', true)}${separator(',', true)}${value('Seats', true)}${separator(',', true)}${value('Price per month', true)}`));
   assert.ok(csv.includes(`${value('Starter')}${separator(',')}${value('1')}${separator(',')}${string('"$0"')}`));
   assert.ok(csv.includes(`${value('Team')}${separator(',')}${value('10')}${separator(',')}${string('"$49, billed yearly"')}`));
@@ -190,11 +190,11 @@ test('CSV and TSV fences highlight delimited fields', () => {
   assert.ok(multiline.includes(string('"a""b"')));
   assert.ok(multiline.includes(`${value('mid"quote')}${separator(',')}${value('plain')}`));
   assert.ok(multiline.endsWith(string('"last')));
-  assert.equal((multiline.match(/carvepunctuation/g) ?? []).length, 6);
+  assert.equal((multiline.match(/carveseparator/g) ?? []).length, 6);
   assert.equal(stripTyped(multiline), '', 'no untyped text is left in the body');
 
   const tsv = body('tsv', 'left,right\t"one\ttwo"\tend');
-  assert.equal((tsv.match(/carvepunctuation/g) ?? []).length, 2);
+  assert.equal((tsv.match(/carveseparator/g) ?? []).length, 2);
   assert.ok(tsv.includes(string('"one\ttwo"', true)));
   assert.ok(tsv.includes(value('left,right', true)));
   assert.ok(tsv.includes(separator('\t', true)));
@@ -204,7 +204,7 @@ test('CSV and TSV fences highlight delimited fields', () => {
 test('parsed CSV fences use the delimited highlighter', () => {
   const rendered = renderCarve('```csv\nPlan,Seats,Price per month\nStarter,1,"$0"\nTeam,10,"$49, billed yearly"\n```\n', { standalone: false }).value;
   assert.match(rendered, /\\carvecodelabel\{csv\}/);
-  assert.equal((rendered.match(/carvepunctuation/g) ?? []).length, 6);
+  assert.equal((rendered.match(/carveseparator/g) ?? []).length, 6);
   assert.equal((rendered.match(/carvestring/g) ?? []).length, 2);
   assert.ok((rendered.match(/carvevalue/g) ?? []).length >= 7);
 });
@@ -212,9 +212,9 @@ test('parsed CSV fences use the delimited highlighter', () => {
 test('the separator color is a red-family hue distinct from the comment grey', () => {
   const { DEFAULT_TEMPLATE } = templateModule;
   const rgb = (name) => DEFAULT_TEMPLATE.match(new RegExp(`definecolor\\{${name}\\}\\{RGB\\}\\{(\\d+),(\\d+),(\\d+)\\}`)).slice(1).map(Number);
-  const [r, g, b] = rgb('carvepunctuation');
-  assert.ok(r > 150 && r > g + 80 && r > b + 80, `carvepunctuation is ${r},${g},${b}`);
-  assert.notDeepEqual(rgb('carvepunctuation'), rgb('carvecomment'));
+  const [r, g, b] = rgb('carveseparator');
+  assert.ok(r > 150 && r > g + 80 && r > b + 80, `carveseparator is ${r},${g},${b}`);
+  assert.notDeepEqual(rgb('carveseparator'), rgb('carvecomment'));
 });
 
 test('keeps executable TeX inert across code, raw blocks, math, and URLs', () => {

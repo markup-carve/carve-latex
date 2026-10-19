@@ -322,7 +322,7 @@ function highlightDelimited(value: string, separator: string): string {
   while (i < value.length) {
     const ch = value[i];
     if (ch === separator) {
-      field(ch, 'carvepunctuation');
+      field(ch, 'carveseparator');
       i += 1;
       continue;
     }
