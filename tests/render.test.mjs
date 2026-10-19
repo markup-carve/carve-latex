@@ -168,26 +168,36 @@ test('CSV and TSV fences highlight delimited fields', () => {
     return found[1];
   };
   const encoded = (value) => [...value].map((character) => character === '\n' ? '\\par\n' : character === '\t' ? '\\char32{}\\char32{}\\char32{}\\char32{}' : `\\char"${character.codePointAt(0).toString(16).toUpperCase()}{}`).join('');
-  const separator = (character) => `\\textcolor{carvepunctuation}{${encoded(character)}}`;
-  const string = (value) => `\\textcolor{carvestring}{${encoded(value)}}`;
+  const bold = (inner, header) => header ? `\\textbf{${inner}}` : inner;
+  const separator = (character, header = false) => bold(`\\textcolor{carvepunctuation}{${encoded(character)}}`, header);
+  const string = (value, header = false) => bold(`\\textcolor{carvestring}{${encoded(value)}}`, header);
+  const value = (text, header = false) => bold(`\\textcolor{carvevalue}{${encoded(text)}}`, header);
+  const stripTyped = (rendered) => rendered
+    .replace(/\\textbf\{/g, '{')
+    .replace(/\\textcolor\{carve(?:value|string|punctuation)\}\{(?:\\char"[0-9A-F]+\{\}|\\char32\{\}|\\par\n)*\}/g, '')
+    .replace(/\\par\n/g, '').replace(/[{}]/g, '');
   const csv = body('csv', 'Plan,Seats,Price per month\nStarter,1,"$0"\nTeam,10,"$49, billed yearly"');
   assert.equal((csv.match(/carvepunctuation/g) ?? []).length, 6);
-  assert.ok(csv.includes(`${encoded('Starter')}${separator(',')}${encoded('1')}${separator(',')}${string('"$0"')}`));
-  assert.ok(csv.includes(string('"$49, billed yearly"')));
+  assert.ok(csv.startsWith(`${value('Plan', true)}${separator(',', true)}${value('Seats', true)}${separator(',', true)}${value('Price per month', true)}`));
+  assert.ok(csv.includes(`${value('Starter')}${separator(',')}${value('1')}${separator(',')}${string('"$0"')}`));
+  assert.ok(csv.includes(`${value('Team')}${separator(',')}${value('10')}${separator(',')}${string('"$49, billed yearly"')}`));
   assert.ok(!csv.includes('carvenumber'));
+  assert.equal(stripTyped(csv), '', 'no untyped text is left in the body');
 
   const multiline = body('csv', 'a,"first\nsecond",z\nx,"a""b",y\nmid"quote,plain\nunterminated,"last');
-  assert.ok(multiline.includes(string('"first\nsecond"')));
+  assert.ok(multiline.includes(string('"first\nsecond"', true)));
   assert.ok(multiline.includes(string('"a""b"')));
-  assert.ok(multiline.includes(`${encoded('mid"quote')}${separator(',')}${encoded('plain')}`));
+  assert.ok(multiline.includes(`${value('mid"quote')}${separator(',')}${value('plain')}`));
   assert.ok(multiline.endsWith(string('"last')));
   assert.equal((multiline.match(/carvepunctuation/g) ?? []).length, 6);
+  assert.equal(stripTyped(multiline), '', 'no untyped text is left in the body');
 
   const tsv = body('tsv', 'left,right\t"one\ttwo"\tend');
   assert.equal((tsv.match(/carvepunctuation/g) ?? []).length, 2);
-  assert.ok(tsv.includes(string('"one\ttwo"')));
-  assert.ok(tsv.includes(encoded('left,right')));
-  assert.ok(tsv.includes(separator('\t')));
+  assert.ok(tsv.includes(string('"one\ttwo"', true)));
+  assert.ok(tsv.includes(value('left,right', true)));
+  assert.ok(tsv.includes(separator('\t', true)));
+  assert.ok(tsv.endsWith(value('end', true)));
 });
 
 test('parsed CSV fences use the delimited highlighter', () => {
@@ -195,6 +205,7 @@ test('parsed CSV fences use the delimited highlighter', () => {
   assert.match(rendered, /\\carvecodelabel\{csv\}/);
   assert.equal((rendered.match(/carvepunctuation/g) ?? []).length, 6);
   assert.equal((rendered.match(/carvestring/g) ?? []).length, 2);
+  assert.ok((rendered.match(/carvevalue/g) ?? []).length >= 7);
 });
 
 test('keeps executable TeX inert across code, raw blocks, math, and URLs', () => {
