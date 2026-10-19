@@ -160,6 +160,43 @@ test('a parsed code block emits one line per payload line', () => {
   assert.equal((environment('~~~\nplain\n~~~\n').match(/\\par\n/g) ?? []).length, 0);
 });
 
+test('CSV and TSV fences highlight delimited fields', () => {
+  const body = (language, value) => {
+    const rendered = renderAst({ type: 'document', children: [{ type: 'code_block', lang: language, value }] }, { standalone: false }).value;
+    const found = rendered.match(/\\begin\{carvecode\}\n([\s\S]*?)\n\\end\{carvecode\}/);
+    assert.ok(found);
+    return found[1];
+  };
+  const encoded = (value) => [...value].map((character) => character === '\n' ? '\\par\n' : character === '\t' ? '\\char32{}\\char32{}\\char32{}\\char32{}' : `\\char"${character.codePointAt(0).toString(16).toUpperCase()}{}`).join('');
+  const separator = (character) => `\\textcolor{carvepunctuation}{${encoded(character)}}`;
+  const string = (value) => `\\textcolor{carvestring}{${encoded(value)}}`;
+  const csv = body('csv', 'Plan,Seats,Price per month\nStarter,1,"$0"\nTeam,10,"$49, billed yearly"');
+  assert.equal((csv.match(/carvepunctuation/g) ?? []).length, 6);
+  assert.ok(csv.includes(`${encoded('Starter')}${separator(',')}${encoded('1')}${separator(',')}${string('"$0"')}`));
+  assert.ok(csv.includes(string('"$49, billed yearly"')));
+  assert.ok(!csv.includes('carvenumber'));
+
+  const multiline = body('csv', 'a,"first\nsecond",z\nx,"a""b",y\nmid"quote,plain\nunterminated,"last');
+  assert.ok(multiline.includes(string('"first\nsecond"')));
+  assert.ok(multiline.includes(string('"a""b"')));
+  assert.ok(multiline.includes(`${encoded('mid"quote')}${separator(',')}${encoded('plain')}`));
+  assert.ok(multiline.endsWith(string('"last')));
+  assert.equal((multiline.match(/carvepunctuation/g) ?? []).length, 6);
+
+  const tsv = body('tsv', 'left,right\t"one\ttwo"\tend');
+  assert.equal((tsv.match(/carvepunctuation/g) ?? []).length, 2);
+  assert.ok(tsv.includes(string('"one\ttwo"')));
+  assert.ok(tsv.includes(encoded('left,right')));
+  assert.ok(tsv.includes(separator('\t')));
+});
+
+test('parsed CSV fences use the delimited highlighter', () => {
+  const rendered = renderCarve('```csv\nPlan,Seats,Price per month\nStarter,1,"$0"\nTeam,10,"$49, billed yearly"\n```\n', { standalone: false }).value;
+  assert.match(rendered, /\\carvecodelabel\{csv\}/);
+  assert.equal((rendered.match(/carvepunctuation/g) ?? []).length, 6);
+  assert.equal((rendered.match(/carvestring/g) ?? []).length, 2);
+});
+
 test('keeps executable TeX inert across code, raw blocks, math, and URLs', () => {
   const result = renderAst({ type: 'document', children: [
     { type: 'code_block', content: '\\end{carvecode}\\input{/etc/passwd}' },
