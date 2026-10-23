@@ -388,6 +388,8 @@ function table(node: AstNode, context: Context): string {
   });
   while (columnSpecs.length < columns) columnSpecs.push(alignments[columnSpecs.length] ?? 'l');
   while (alignments.length < columns) alignments.push('l');
+  const explicitHeadRows = (node.rowGroups as { headRows?: number } | undefined)?.headRows;
+  const headRows = typeof explicitHeadRows === 'number' ? explicitHeadRows : (rows[0]?.cells ?? []).some((cell) => cell.header) ? 1 : 0;
   const spans = resolveSpans(rows);
   const lines = rows.map((row, rowIndex) => {
     const cells = row.cells ?? row.children ?? [];
@@ -403,12 +405,11 @@ function table(node: AstNode, context: Context): string {
       if (colspan > 1) rendered = `\\multicolumn{${colspan}}{${alignments[column]}}{${rendered}}`;
       values.push(rendered); column += colspan - 1;
     }
-    return `${values.join(' & ')} \\\\${rowIndex === 0 && cells.some((cell) => cell.header === true) ? ' \\midrule' : ''}`;
+    const ruled = headRows > 0 ? rowIndex === headRows - 1 : rowIndex === 0 && cells.some((cell) => cell.header === true);
+    return `${values.join(' & ')} \\\\${ruled ? ' \\midrule' : ''}`;
   });
   const captionText = Array.isArray(node.caption) ? `\\caption${Array.isArray(node.shortCaption) ? `[${caption(node.shortCaption as AstNode[], context)}]` : ''}{${caption(node.caption as AstNode[], context)}} \\\\\n` : '';
-  const explicitHeadRows = (node.rowGroups as { headRows?: number } | undefined)?.headRows;
-  const headRows = typeof explicitHeadRows === 'number' ? explicitHeadRows : (rows[0]?.cells ?? []).some((cell) => cell.header) ? 1 : 0;
-  const repeatedHead = headRows > 0 ? `\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\bottomrule\n\\endfirsthead\n\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\bottomrule\n\\endhead\n${lines.slice(headRows).join('\n')}` : `\\toprule\n${lines.join('\n')}`;
+  const repeatedHead = headRows > 0 ? `\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\endfirsthead\n\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\endhead\n${lines.slice(headRows).join('\n')}` : `\\toprule\n${lines.join('\n')}`;
   const note = typeof node.attrs?.note === 'string' ? `\n\\multicolumn{${columns}}{l}{\\footnotesize ${escapeLatex(node.attrs.note)}} \\\\` : '';
   const renderedTable = `\\begin{longtable}{${columnSpecs.join('')}}\n${captionText}${repeatedHead}${note}\n\\bottomrule\n\\end{longtable}`;
   return node.attrs?.landscape === true ? environment('landscape', renderedTable) : renderedTable;
