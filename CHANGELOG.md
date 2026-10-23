@@ -4,6 +4,20 @@ Notable changes to `@markup-carve/carve-latex`.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-23
+
+### Breaking
+
+- A custom template must define the `carvevalue` and `carveseparator` colors, which CSV and TSV fences now use; the bundled templates define both. The separator color was named `carvepunctuation` on `main` before this release and has no alias (#31, #33).
+
+### Added
+
+- CSV and TSV fences are highlighted: values, quoted strings (doubled quotes included) and separators each get a color, and the header record is bold (#30, #31). The separator is red so it stands apart from comment grey (#32).
+
+### Changed
+
+- Requires `@markup-carve/carve` 0.1.13 or later.
+
 ## [0.1.2] - 2026-10-14
 
 ### Fixed

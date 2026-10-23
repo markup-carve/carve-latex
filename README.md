@@ -69,7 +69,7 @@ margin: 25mm
 
 A `::: toc` block prints the table of contents where it stands instead of at the template's slot. `::: footnotes` adds nothing, since footnotes print at their references; the other placements (`bibliography`, `references`, `glossary`, `index`) stay at the template's slot. Each ignored placement is reported as `normalized`.
 
-Supported document classes are `article`, `report`, `book`, and `thesis`. The bundled templates are starting points for publisher-specific work. A custom template uses placeholders such as `{{body}}`, `{{title}}`, `{{bibliographySetup}}`, and `{{indexPrint}}`.
+Supported document classes are `article`, `report`, `book`, and `thesis`. The bundled templates are starting points for publisher-specific work. A custom template uses placeholders such as `{{body}}`, `{{title}}`, `{{bibliographySetup}}`, and `{{indexPrint}}`. It must also define the highlight colors the bundled templates define: `carvekeyword`, `carvestring`, `carvenumber`, `carvecomment`, `carvevalue` and `carveseparator`.
 
 ## Publication features
 
