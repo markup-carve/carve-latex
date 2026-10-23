@@ -31,6 +31,14 @@ test('renders spanning, captioned tables with repeated heads', () => {
   assert.match(result.value, /\\caption\{Results\} \\\\\n\\toprule/);
   assert.match(result.value, /\\multicolumn\{2\}\{l\}\{Head\}/);
   assert.match(result.value, /\\endfirsthead/);
+  assert.match(result.value, /\\midrule\n\\endfirsthead\n\\toprule\n.*\\midrule\n\\endhead\n/);
+  assert.equal(result.value.match(/\\bottomrule/g)?.length, 1);
+});
+
+test('rules a multi-row head once, below its last row', () => {
+  const row = (value, header) => ({ type: 'table_row', cells: [{ type: 'table_cell', header, children: [text(value)] }] });
+  const result = renderAst({ type: 'document', children: [{ type: 'table', rowGroups: { headRows: 2, bodies: [{ headRows: 0, bodyRows: 1 }], footRows: 0 }, rows: [row('H1', true), row('H2', true), row('B', false)] }] });
+  assert.match(result.value, /\\toprule\nH1 \\\\\nH2 \\\\ \\midrule\n\\endfirsthead/);
 });
 
 test('emits safe syntax color and richer BibLaTeX fields', () => {
