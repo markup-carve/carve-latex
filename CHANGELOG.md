@@ -12,7 +12,7 @@ Notable changes to `@markup-carve/carve-latex`.
 
 ### Fixed
 
-- A table head is ruled once: the `\bottomrule` drawn under the head's `\midrule` on every page is gone, and a head of several rows gets its `\midrule` below the last of them instead of the first.
+- A table head is ruled once: the `\bottomrule` drawn under the head's `\midrule` on every page is gone, and a head of several rows gets its `\midrule` below the last of them instead of the first (#35).
 
 ### Added
 
