@@ -57,7 +57,8 @@ export function readProject(path: string, options: ProjectOptions = {}): Project
       document = expanded.doc;
       // `detail` is the resolver's own error text and commonly embeds an
       // absolute host path, so it is dropped rather than reported (I7).
-      for (const warning of expanded.warnings) includeWarnings.push({ rule: warning.rule, message: warning.message, line: warning.line, column: warning.column, ...(warning.file ? { file: warning.file } : {}) });
+      for (const warning of expanded.warnings) includeWarnings.push({ rule: warning.rule, message: warning.message, line: warning.line, column: warning.column, file: warning.file ?? chapter,
+        ...(warning.includedBy?.length ? { includedBy: warning.includedBy.map((site) => ({ file: site.file ?? chapter, line: site.line, column: site.column })) } : {}) });
       for (const dependency of expanded.dependencies) if (dependency.resolved && !includeDependencies.includes(dependency.id)) includeDependencies.push(dependency.id);
     }
     return (toAstJson(document) as unknown as AstNode).children ?? [];

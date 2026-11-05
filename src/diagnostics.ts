@@ -4,7 +4,7 @@ export function reportToSarif(report: PublishingReport, source = 'document.crv')
   return { version: '2.1.0', $schema: 'https://json.schemastore.org/sarif-2.1.0.json', runs: [{
     tool: { driver: { name: 'carve-latex', informationUri: 'https://github.com/markup-carve/carve-latex' } },
     results: report.diagnostics.map((item) => ({ ruleId: item.code, level: item.severity === 'error' ? 'error' : item.severity === 'warning' ? 'warning' : 'note',
-      message: { text: item.message }, locations: item.source ? [{ physicalLocation: { artifactLocation: { uri: source }, region: { startLine: item.source.line ?? 1, startColumn: item.source.column ?? 1 } } }] : [] })),
+      message: { text: item.message }, locations: item.source ? [{ physicalLocation: { artifactLocation: { uri: item.source.file ?? source }, region: { startLine: item.source.line ?? 1, startColumn: item.source.column ?? 1 } } }] : [] })),
   }] };
 }
 
