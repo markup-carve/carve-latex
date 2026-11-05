@@ -52,8 +52,7 @@ And this one.
 
 ## Data
 
-| Measure | Result |
-|---------|-------:|
+|= Measure |={>} Result |
 | Fidelity | 100 |
 ^ Table #: Fidelity of the translated constructs
 

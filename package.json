@@ -46,7 +46,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@markup-carve/carve": "^0.1.13",
+    "@markup-carve/carve": "github:markup-carve/carve-js#78593547309cad34ec1086dbb28fa62b722abf4c",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
