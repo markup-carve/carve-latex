@@ -376,20 +376,17 @@ function withoutNumberLabel(nodes: AstNode[]): AstNode[] {
 function table(node: AstNode, context: Context): string {
   const rows = node.rows ?? node.children ?? [];
   const columns = Math.max(1, ...rows.map((row) => (row.cells ?? row.children ?? []).length));
-  const first = rows[0];
   const columnsMetadata = (node.columns as Array<Record<string, unknown>> | undefined) ?? [];
-  const alignmentNames = Array.from({ length: columns }, (_, index) => String((first?.cells ?? first?.children ?? [])[index]?.align ?? columnsMetadata[index]?.align ?? 'left'));
-  const alignments = alignmentNames.map((name) => ({ left: 'l', center: 'c', right: 'r' } as Record<string, string>)[name] ?? 'l');
-  const columnSpecs = columnsMetadata.map((column, index) => {
-    if (typeof column.width !== 'number') return alignments[index] ?? 'l';
-    const family = column.valign === 'middle' ? 'm' : column.valign === 'bottom' ? 'b' : 'p';
-    const alignment = alignmentNames[index] === 'right' ? '>{\\raggedleft\\arraybackslash}' : alignmentNames[index] === 'center' ? '>{\\centering\\arraybackslash}' : '>{\\raggedright\\arraybackslash}';
-    return `${alignment}${family}{${Math.max(0.01, Math.min(1, column.width))}\\linewidth}`;
-  });
-  while (columnSpecs.length < columns) columnSpecs.push(alignments[columnSpecs.length] ?? 'l');
-  while (alignments.length < columns) alignments.push('l');
   const explicitHeadRows = (node.rowGroups as { headRows?: number } | undefined)?.headRows;
-  const headRows = typeof explicitHeadRows === 'number' ? explicitHeadRows : (rows[0]?.cells ?? []).some((cell) => cell.header) ? 1 : 0;
+  const headRows = typeof explicitHeadRows === 'number' ? explicitHeadRows : headRowRun(rows);
+  // CARVE-P12-040: only a head-row header cell, or an aligned placeholder in a
+  // head row, sets its own physical column's default; a body cell's symbols stay local.
+  const alignmentNames = Array.from({ length: columns }, (_, index) => alignmentName(columnsMetadata[index]?.align));
+  rows.slice(0, headRows).forEach((row) => (row.cells ?? row.children ?? []).forEach((cell, index) => {
+    const align = alignmentName(cell.align);
+    if (align && index < columns && (cell.header === true || cell.span !== undefined)) alignmentNames[index] = align;
+  }));
+  const columnSpecs = alignmentNames.map((name, index) => columnSpec(name, columnsMetadata[index]));
   const spans = resolveSpans(rows);
   const lines = rows.map((row, rowIndex) => {
     const cells = row.cells ?? row.children ?? [];
@@ -402,7 +399,12 @@ function table(node: AstNode, context: Context): string {
       const { colspan, rowspan } = span;
       let rendered = renderChildren(cell.children ?? [], context);
       if (rowspan > 1) rendered = `\\multirow{${rowspan}}{*}{${rendered}}`;
-      if (colspan > 1) rendered = `\\multicolumn{${colspan}}{${alignments[column]}}{${rendered}}`;
+      const align = alignmentName(cell.align) ?? alignmentNames[column];
+      if (colspan > 1) rendered = `\\multicolumn{${colspan}}{${columnSpec(align, undefined)}}{${rendered}}`;
+      else {
+        const spec = columnSpec(align, columnsMetadata[column], cell.valign);
+        if (spec !== columnSpecs[column]) rendered = `\\multicolumn{1}{${spec}}{${rendered}}`;
+      }
       values.push(rendered); column += colspan - 1;
     }
     const ruled = headRows > 0 ? rowIndex === headRows - 1 : rowIndex === 0 && cells.some((cell) => cell.header === true);
@@ -413,6 +415,28 @@ function table(node: AstNode, context: Context): string {
   const note = typeof node.attrs?.note === 'string' ? `\n\\multicolumn{${columns}}{l}{\\footnotesize ${escapeLatex(node.attrs.note)}} \\\\` : '';
   const renderedTable = `\\begin{longtable}{${columnSpecs.join('')}}\n${captionText}${repeatedHead}${note}\n\\bottomrule\n\\end{longtable}`;
   return node.attrs?.landscape === true ? environment('landscape', renderedTable) : renderedTable;
+}
+
+// PART 9 §5 T9: the head is the leading run of rows whose every owned cell is a header.
+function headRowRun(rows: AstNode[]): number {
+  let count = 0;
+  for (const row of rows) {
+    const cells = row.cells ?? row.children ?? [];
+    if (!cells.some((cell) => cell.header === true) || !cells.every((cell) => cell.header === true || cell.span !== undefined)) break;
+    count += 1;
+  }
+  return count;
+}
+
+function alignmentName(value: unknown): 'left' | 'center' | 'right' | undefined {
+  return value === 'left' || value === 'center' || value === 'right' ? value : undefined;
+}
+
+function columnSpec(align: string | undefined, column: Record<string, unknown> | undefined, valign = column?.valign): string {
+  if (typeof column?.width !== 'number') return ({ center: 'c', right: 'r' } as Record<string, string>)[align ?? ''] ?? 'l';
+  const family = valign === 'middle' ? 'm' : valign === 'bottom' ? 'b' : 'p';
+  const alignment = align === 'right' ? '>{\\raggedleft\\arraybackslash}' : align === 'center' ? '>{\\centering\\arraybackslash}' : '>{\\raggedright\\arraybackslash}';
+  return `${alignment}${family}{${Math.max(0.01, Math.min(1, column.width))}\\linewidth}`;
 }
 
 type SpanSlot = { rowspan: number; colspan: number; covered?: 'row' | 'column' };
