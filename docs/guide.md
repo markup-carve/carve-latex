@@ -79,7 +79,7 @@ Supported document classes are `article`, `report`, `book`, and `thesis`. The bu
 - theorem, lemma, proposition, corollary, definition, proof and remark environments
 - typed BibLaTeX/Biber records, CSL JSON import, and explicit DOI lookup
 - figures, subfigure groups, short captions, placement, sizing, and tagged-PDF alternative text
-- multipage tables with captions, alignment, widths, repeated heads, and row/column spans
+- multipage tables with captions, widths, repeated heads, and row/column spans; a head-row cell's alignment (`|={>} Price |`) sets its column, and a body cell's (`|{<} 12 |`) applies to that cell alone
 - ordered, unordered, task and definition lists
 - injection-safe syntax-highlighted code blocks with compact language labels
 - CSV and TSV fences color every field (value, quoted string, separator) and bold the header record, including doubled quotes
