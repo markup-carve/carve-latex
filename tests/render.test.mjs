@@ -324,3 +324,50 @@ test('a ruby pair with an empty annotation prints its base alone', () => {
   assert.equal(result.value.trim(), '字\\shortstack{{\\scriptsize x}\\\\X}');
   assert.deepEqual(codes(result), []);
 });
+
+const cell = (value, extra = {}) => ({ type: 'table_cell', children: value === undefined ? [] : [text(value)], ...extra });
+const tableOf = (rows, extra = {}) => renderAst({ type: 'document', children: [{ type: 'table', rows: rows.map((cells) => ({ type: 'table_row', cells })), ...extra }] }).value;
+
+test('a body cell alignment applies to that cell only', () => {
+  const value = tableOf([
+    [cell('a', { header: true }), cell('b', { header: true, align: 'right' })],
+    [cell('x'), cell('5')],
+    [cell('y', { align: 'center' }), cell('6', { align: 'left' })],
+  ]);
+  assert.match(value, /\\begin\{longtable\}\{lr\}/);
+  assert.match(value, /\nx & 5 \\\\/);
+  assert.match(value, /\n\\multicolumn\{1\}\{c\}\{y\} & \\multicolumn\{1\}\{l\}\{6\} \\\\/);
+});
+
+test('a body row never sets a column default, even as the first row', () => {
+  const value = tableOf([[cell('x', { align: 'center' }), cell('y')], [cell('1'), cell('2')]]);
+  assert.match(value, /\\begin\{longtable\}\{ll\}/);
+  assert.match(value, /\\multicolumn\{1\}\{c\}\{x\} & y \\\\\n1 & 2 \\\\/);
+});
+
+test('a head-row placeholder sets its own column default and a header colspan does not copy it', () => {
+  const value = tableOf([
+    [cell('Price', { header: true, align: 'right', colspan: 2 }), cell(undefined, { span: 'colspan', align: 'left' }), cell('Stock', { header: true, align: 'center' })],
+    [cell('12.50'), cell('EUR'), cell('3')],
+  ]);
+  assert.match(value, /\\begin\{longtable\}\{rlc\}/);
+  assert.match(value, /\\multicolumn\{2\}\{r\}\{Price\} & Stock \\\\ \\midrule/);
+  assert.match(value, /\n12.50 & EUR & 3 \\\\/);
+});
+
+test('a cell vertical alignment overrides a width column and inherits its horizontal default', () => {
+  const value = tableOf([[cell('a', { header: true }), cell('b', { header: true })], [cell('x', { valign: 'bottom' }), cell('y')]],
+    { columns: [{ align: 'right', width: 0.4 }, {}] });
+  assert.match(value, /\\begin\{longtable\}\{>\{\\raggedleft\\arraybackslash\}p\{0.4\\linewidth\}l\}/);
+  assert.match(value, /\\multicolumn\{1\}\{>\{\\raggedleft\\arraybackslash\}b\{0.4\\linewidth\}\}\{x\} & y \\\\/);
+});
+
+test('every leading all-header row joins the head and a later head-row marker sets the column', () => {
+  const value = tableOf([
+    [cell('a', { header: true }), cell('b', { header: true })],
+    [cell('c', { header: true, align: 'right' }), cell('d', { header: true })],
+    [cell('1'), cell('2')],
+  ]);
+  assert.match(value, /\\begin\{longtable\}\{rl\}/);
+  assert.match(value, /\\toprule\na & b \\\\\nc & d \\\\ \\midrule\n\\endfirsthead/);
+});
