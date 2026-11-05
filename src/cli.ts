@@ -26,7 +26,10 @@ const flag = (...names: string[]): string | undefined => {
 };
 const has = (name: string): boolean => argv.includes(name);
 const project = projectArgument >= 0 ? readProject(input, { includes: !has('--no-includes') }) : undefined;
-for (const warning of project?.includeWarnings ?? []) console.error(`${warning.file ?? input}:${warning.line}:${warning.column}: ${warning.rule}: ${warning.message}`);
+for (const warning of project?.includeWarnings ?? []) {
+  const site = warning.includedBy?.[0];
+  console.error(`${warning.file ?? input}:${warning.line}:${warning.column}: ${warning.rule}: ${warning.message}${site ? ` (included from ${site.file ?? input}:${site.line}:${site.column})` : ''}`);
+}
 const source = project ? '' : input === '-' ? readFileSync(0, 'utf8') : readFileSync(resolve(input), 'utf8');
 const assetRoot = input === '-' ? process.cwd() : dirname(resolve(input));
 const cslBibliography = flag('--csl')?.split(',').filter(Boolean);

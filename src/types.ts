@@ -18,7 +18,8 @@ export interface PublishingDiagnostic {
   fidelity: Fidelity;
   confidence: Confidence;
   path?: string;
-  source?: { line?: number; column?: number; offset?: number };
+  /** `file` names the included file the position is counted in; absent for the top-level document. */
+  source?: { file?: string; line?: number; column?: number; offset?: number };
 }
 
 export interface PublishingReport {
@@ -124,4 +125,6 @@ export interface IncludeDiagnostic {
   line: number;
   column: number;
   file?: string;
+  /** The include chain that reached `file`, top-level directive first. */
+  includedBy?: Array<{ file?: string; line: number; column: number }>;
 }

@@ -20,7 +20,7 @@
           "fidelity": { "enum": ["preserved", "normalized", "degraded", "dropped"] },
           "confidence": { "enum": ["exact", "inferred", "fallback"] },
           "path": { "type": "string" },
-          "source": { "type": "object", "properties": { "line": { "type": "integer" }, "column": { "type": "integer" }, "offset": { "type": "integer" } }, "additionalProperties": false }
+          "source": { "type": "object", "properties": { "file": { "type": "string", "minLength": 1 }, "line": { "type": "integer" }, "column": { "type": "integer" }, "offset": { "type": "integer" } }, "additionalProperties": false }
         },
         "additionalProperties": false
       }

@@ -677,9 +677,9 @@ function prepareGlossary(context: Context): void {
 function bibtex(value: string): string { return value.replace(/[{}\\%#]/g, '').replace(/\s+/g, ' ').trim(); }
 
 function diagnostic(context: Context, node: AstNode, code: string, message: string, fidelity: PublishingDiagnostic['fidelity']): void {
-  const pos = node.pos as { startLine?: number; startColumn?: number; startOffset?: number } | undefined;
+  const pos = node.pos as { file?: string; startLine?: number; startColumn?: number; startOffset?: number } | undefined;
   const start = typeof pos?.startLine === 'number'
-    ? { line: pos.startLine, ...(typeof pos.startColumn === 'number' ? { column: pos.startColumn } : {}), ...(typeof pos.startOffset === 'number' ? { offset: pos.startOffset } : {}) }
+    ? { ...(typeof pos.file === 'string' && pos.file ? { file: pos.file } : {}), line: pos.startLine, ...(typeof pos.startColumn === 'number' ? { column: pos.startColumn } : {}), ...(typeof pos.startOffset === 'number' ? { offset: pos.startOffset } : {}) }
     : undefined;
   context.diagnostics.push({ code, message, severity: fidelity === 'dropped' ? 'warning' : 'info', fidelity,
     confidence: 'exact', path: context.path.join('/') || node.type, ...(start ? { source: start } : {}) });

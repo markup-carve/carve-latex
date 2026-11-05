@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { readProject } from '../dist/index.js';
+import { readProject, renderAst, reportToSarif } from '../dist/index.js';
 
 const project = (files, manifest = 'version: 1\nchapters: [one.crv]\n') => {
   const root = mkdtempSync(join(tmpdir(), 'carve-latex-includes-'));
@@ -111,4 +111,22 @@ for (const spec of ['..', '.', 'parts', './parts', '']) {
 test('refuses an absolute includeRoot that does not exist', () => {
   const root = project({ 'one.crv': '{{ child.crv }}\n' }, 'version: 1\nchapters: [one.crv]\nincludeRoot: /nonexistent-carve-latex-root\n');
   assert.throws(() => readProject(join(root, 'book.yml')), /includeRoot/);
+});
+
+test('a loss in included content names the included file and its own line', () => {
+  const root = project({ 'one.crv': 'Intro.\n\n{{ parts/child.crv }}\n', 'parts/child.crv': 'Child.\n\n```mermaid\ngraph\n```\n' });
+  const result = renderAst(readProject(join(root, 'book.yml')).document);
+  const loss = result.report.diagnostics.find((item) => item.code === 'diagram-source-degraded');
+  assert.deepEqual(loss.source, { file: join(root, 'parts/child.crv'), line: 3, column: 1, offset: 8 });
+  const sarif = reportToSarif(result.report, 'book.yml');
+  assert.equal(sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri, join(root, 'parts/child.crv'));
+});
+
+test('an include warning names its own file and the chain that reached it', () => {
+  const root = project({ 'one.crv': 'Intro.\n\n{{ parts/child.crv }}\n\n{{ gone.crv }}\n', 'parts/child.crv': 'Child.\n\n{{ missing.crv }}\n' });
+  const { includeWarnings } = readProject(join(root, 'book.yml'));
+  assert.deepEqual(includeWarnings.map(({ file, line, includedBy }) => ({ file, line, includedBy })), [
+    { file: join(root, 'parts/child.crv'), line: 3, includedBy: [{ file: join(root, 'one.crv'), line: 3, column: 1 }] },
+    { file: join(root, 'one.crv'), line: 5, includedBy: undefined },
+  ]);
 });

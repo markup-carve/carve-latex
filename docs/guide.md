@@ -104,7 +104,7 @@ publish:
   tableOfContents: true
 ```
 
-Chapters may pull in other files with `{{ path }}`. A project expands them under a containment root that defaults to the project root, resolving a nested path against the file that wrote it. `includeRoot` narrows that root and must be an absolute path: a relative one would be resolved against whatever directory the build ran in, so it is refused rather than guessed. `includes: false` in the manifest, or `--no-includes` on the command line, leaves the directives literal. A target outside the root, a missing one and a cycle each leave the directive as written and report a warning on stderr.
+Chapters may pull in other files with `{{ path }}`. A project expands them under a containment root that defaults to the project root, resolving a nested path against the file that wrote it. `includeRoot` narrows that root and must be an absolute path: a relative one would be resolved against whatever directory the build ran in, so it is refused rather than guessed. `includes: false` in the manifest, or `--no-includes` on the command line, leaves the directives literal. A target outside the root, a missing one and a cycle each leave the directive as written and report a warning on stderr. The warning names the file the directive is written in, and a warning from a nested include adds the top-level directive that reached it (`(included from one.crv:3:1)`); `readProject()` returns that chain as `includedBy`.
 
 ```yaml
 version: 1
@@ -134,7 +134,7 @@ Rendering returns the generated value and a versioned report:
 
 Every unsupported or target-specific construct is classified as `normalized`, `degraded`, or `dropped`; supported content is silent. Remote images are not downloaded implicitly. Non-LaTeX raw blocks are rendered visibly and diagnosed. Comments are intentionally dropped and diagnosed. `--strict` turns degradation or loss into a failed build.
 
-`--fail-on normalized|degraded|dropped` gives release pipelines a precise threshold. `--sarif diagnostics.sarif` emits source-positioned diagnostics for code-scanning systems. The report and project formats have JSON Schemas under `resources/`.
+`--fail-on normalized|degraded|dropped` gives release pipelines a precise threshold. A diagnostic for content an include brought in carries `source.file`, the included file, and its line and column are counted in that file. `--sarif diagnostics.sarif` emits source-positioned diagnostics for code-scanning systems. SARIF results point at that file too. The report and project formats have JSON Schemas under `resources/`.
 
 ## Library
 
