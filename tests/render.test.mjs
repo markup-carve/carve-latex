@@ -371,3 +371,19 @@ test('every leading all-header row joins the head and a later head-row marker se
   assert.match(value, /\\begin\{longtable\}\{rl\}/);
   assert.match(value, /\\toprule\na & b \\\\\nc & d \\\\ \\midrule\n\\endfirsthead/);
 });
+
+test('braced cell alignment sets the head-row column default and a body cell locally', () => {
+  const result = renderCarve('|= Item |={>} Price |\n| Tea | 3 |\n|{~} Cake |{<} 12 |\n');
+  assert.match(result.value, /\\begin\{longtable\}\{lr\}/);
+  assert.match(result.value, /\nTea & 3 \\\\\n\\multicolumn\{1\}\{c\}\{Cake\} & \\multicolumn\{1\}\{l\}\{12\} \\\\/);
+});
+
+test('the deprecated glued header marker still reads as the braced one', () => {
+  assert.equal(renderCarve('|= a |=> b |\n| x | 1 |\n').value, renderCarve('|= a |={>} b |\n| x | 1 |\n').value);
+});
+
+test('an erased comment line folds the paragraphs around it into one', () => {
+  const result = renderCarve('one\n%% gone\ntwo\n', { standalone: false });
+  assert.equal(result.value, 'one\ntwo\n');
+  assert.deepEqual(codes(result), ['comment-dropped']);
+});
