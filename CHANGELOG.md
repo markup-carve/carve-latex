@@ -4,6 +4,22 @@ Notable changes to `@markup-carve/carve-latex`.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-11
+
+### Fixed
+
+- Per-cell table alignment is honored: a body cell's alignment applies to that cell, head-row header cells set their column default, and a head of several rows is treated as one head (#39).
+- A paragraph split only by an erased `%%` comment line renders as one paragraph (#41).
+
+### Added
+
+- Diagnostics and include warnings name the included file they point into (`source.file`, SARIF artifact URI, `included from` in the CLI) (#40).
+- Braced cell alignment (`|={>}`) is read; the old glued `|=>` still works and the engine reports it as `deprecated-cell-alignment` (#41).
+
+### Changed
+
+- Requires `@markup-carve/carve` 0.1.16 or later.
+
 ## [0.1.3] - 2026-10-23
 
 ### Breaking
