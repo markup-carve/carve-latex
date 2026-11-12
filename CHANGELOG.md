@@ -4,7 +4,7 @@ Notable changes to `@markup-carve/carve-latex`.
 
 ## [Unreleased]
 
-## [0.1.4] - 2026-11-11
+## [0.1.4] - 2026-11-12
 
 ### Fixed
 
@@ -18,7 +18,7 @@ Notable changes to `@markup-carve/carve-latex`.
 
 ### Changed
 
-- Requires `@markup-carve/carve` 0.1.16 or later.
+- Requires `@markup-carve/carve` 0.1.16 or later, from the npm registry (#44).
 
 ## [0.1.3] - 2026-10-23
 
