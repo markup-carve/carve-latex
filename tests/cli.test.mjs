@@ -16,7 +16,8 @@ test('CLI writes TeX and a fidelity report', () => {
 });
 
 test('CLI accepts canonical AST JSON', () => {
-  const input = JSON.stringify({ type: 'document', srcByteLength: 3, children: [{ type: 'paragraph', children: [{ type: 'text', value: 'AST' }] }] });
+  // AST contract 2.0 requires astVersion on the document (C2-A tree contract).
+  const input = JSON.stringify({ type: 'document', astVersion: '2.0', srcByteLength: 3, children: [{ type: 'paragraph', children: [{ type: 'text', value: 'AST' }] }] });
   const result = spawnSync(process.execPath, ['dist/cli.js', '-', '--from-json', '--fragment'], { input, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, 'AST\n');

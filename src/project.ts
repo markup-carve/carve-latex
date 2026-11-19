@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { expandIncludes, parse, toAstJson } from '@markup-carve/carve';
+import { encodeTree, includeDependencies, parseWithDiagnostics, type Diagnostic } from '@markup-carve/carve';
 import { fileSystemResolver } from '@markup-carve/carve/node';
 import { carveExtensions } from './citations.js';
 import { compileAst } from './compile.js';
@@ -19,22 +19,73 @@ export interface Project {
 }
 
 /**
- * The containment root for a project's includes.
+ * The containment root for a project's includes, or undefined when includes are off.
  *
- * A manifest `includeRoot` reaches the resolver unchanged. Resolving it here
- * would defeat the resolver's own refusal of a relative root, which is what
- * keeps containment off the process working directory (PART 9 section 19 I10):
- * a relative spec resolves against exactly that, so `..` would root a build at
- * the parent of whatever directory it happened to run in.
+ * A relative `includeRoot` is refused rather than resolved: resolving it would
+ * root containment at the process working directory (C2-N clauses of
+ * `spec/0.2/includes.md` give the resolver an absolute root), so `..` would
+ * root a build at the parent of whatever directory it happened to run in.
  */
-function includeResolver(manifest: ProjectManifest, root: string, options: ProjectOptions) {
+function includeRoot(manifest: ProjectManifest, root: string, options: ProjectOptions): string | undefined {
   if (options.includes === false || manifest.includes === false) return undefined;
   const configured = manifest.includeRoot;
-  try {
-    return fileSystemResolver(configured ?? root);
-  } catch (error) {
-    throw new Error(`Project includeRoot: ${error instanceof Error ? error.message : String(error)}`);
+  if (configured === undefined) return root;
+  if (typeof configured !== 'string' || !isAbsolute(configured)) throw new Error(`Project includeRoot must be an absolute path, got ${JSON.stringify(configured)}.`);
+  if (!existsSync(configured) || !statSync(configured).isDirectory()) throw new Error(`Project includeRoot does not exist: ${configured}`);
+  return configured;
+}
+
+type Located = { file?: string; line: number; column: number };
+
+/**
+ * The tree with every include node replaced by what it stands for: an expanded
+ * include by its children, a refused one by its directive as literal text (the
+ * HTML writer renders it the same way, C2-N include-unresolved). Positions in
+ * included content name their file by the resolver id; it becomes an absolute path.
+ */
+function flattenIncludes(nodes: AstNode[], source: (file: string | undefined) => string, absolute: (file: string | undefined) => string | undefined): AstNode[] {
+  return nodes.flatMap((node): AstNode[] => {
+    if (node.type === 'include') {
+      if (Array.isArray(node.children)) return flattenIncludes(node.children, source, absolute);
+      const pos = node.pos as { startOffset?: number; endOffset?: number; file?: string } | undefined;
+      const text = pos && typeof pos.startOffset === 'number' && typeof pos.endOffset === 'number'
+        ? Buffer.from(source(pos.file), 'utf8').subarray(pos.startOffset, pos.endOffset).toString('utf8')
+        : `{{ ${String(node.path ?? '')} }}`;
+      return [{ type: 'paragraph', children: [{ type: 'text', value: text }], ...(pos ? { pos: relocate(pos, absolute) } : {}) }];
+    }
+    const copy: AstNode = { ...node };
+    if (node.pos) copy.pos = relocate(node.pos as Record<string, unknown>, absolute);
+    for (const key of Object.keys(copy)) {
+      const value = copy[key];
+      if (Array.isArray(value) && value.some((item) => item && typeof item === 'object' && typeof (item as AstNode).type === 'string')) copy[key] = flattenIncludes(value as AstNode[], source, absolute);
+      else if (value && typeof value === 'object' && typeof (value as AstNode).type === 'string' && key !== 'pos') copy[key] = flattenIncludes([value as AstNode], source, absolute)[0];
+    }
+    return [copy];
+  });
+}
+
+function relocate(pos: Record<string, unknown>, absolute: (file: string | undefined) => string | undefined): Record<string, unknown> {
+  if (typeof pos.file !== 'string') return pos;
+  return { ...pos, file: absolute(pos.file) };
+}
+
+/** The include warning a 0.2 parse diagnostic stands for, with the chain of include sites that reached it. */
+function includeWarning(diagnostic: Diagnostic, document: AstNode, chapter: string, absolute: (file: string | undefined) => string | undefined): IncludeDiagnostic {
+  const chain: AstNode[] = [];
+  let node: AstNode | undefined = document;
+  for (const segment of (diagnostic.path ?? '').split('/').slice(1)) {
+    const next: unknown = node?.[segment] ?? (Array.isArray(node) ? node[Number(segment)] : undefined);
+    node = next as AstNode | undefined;
+    if (node && !Array.isArray(node) && node.type === 'include') chain.push(node);
   }
+  const site = (include: AstNode | undefined): Located => {
+    const pos = include?.pos as { startLine?: number; startColumn?: number; file?: string } | undefined;
+    return { file: absolute(pos?.file) ?? chapter, line: pos?.startLine ?? 1, column: pos?.startColumn ?? 1 };
+  };
+  const own = site(chain.at(-1));
+  const includedBy = chain.slice(0, -1).map(site);
+  return { rule: diagnostic.code, message: diagnostic.message, line: own.line, column: own.column, file: own.file ?? chapter,
+    ...(includedBy.length ? { includedBy } : {}) };
 }
 
 export function readProject(path: string, options: ProjectOptions = {}): Project {
@@ -46,24 +97,42 @@ export function readProject(path: string, options: ProjectOptions = {}): Project
     if (local.startsWith('..') || isAbsolute(local)) throw new Error(`Chapter must stay inside the project root: ${chapter}`);
     return path;
   });
-  const resolver = includeResolver(manifest, root, options);
+  const containment = includeRoot(manifest, root, options);
+  let resolver: ReturnType<typeof fileSystemResolver> | undefined;
+  try {
+    resolver = containment === undefined ? undefined : fileSystemResolver(containment);
+  } catch (error) {
+    throw new Error(`Project includeRoot: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const includeWarnings: IncludeDiagnostic[] = [];
   const includeDependencies: string[] = [];
+  const extensions = carveExtensions({ ...(manifest.publish ?? {}), assetRoot: root });
   const children = chapterPaths.flatMap((chapter) => {
     const source = readFileSync(chapter, 'utf8');
-    let document = parse(source, { extensions: carveExtensions({ ...(manifest.publish ?? {}), assetRoot: root }) });
+    const toAbsolute = (file: string | undefined) => (file === undefined || containment === undefined ? undefined : resolve(containment, file));
+    const readSource = (file: string | undefined) => {
+      const target = toAbsolute(file);
+      try { return target ? readFileSync(target, 'utf8') : source; } catch { return ''; }
+    };
+    const parsed = parseWithDiagnostics(source, { extensions,
+      ...(resolver && containment !== undefined ? { includes: { resolver, file: relative(containment, chapter) } } : {}) });
+    const document = JSON.parse(encodeTree(parsed.document)) as AstNode;
     if (resolver) {
-      const expanded = expandIncludes(document, source, { resolve: resolver, sourcePath: chapter });
-      document = expanded.doc;
-      // `detail` is the resolver's own error text and commonly embeds an
-      // absolute host path, so it is dropped rather than reported (I7).
-      for (const warning of expanded.warnings) includeWarnings.push({ rule: warning.rule, message: warning.message, line: warning.line, column: warning.column, file: warning.file ?? chapter,
-        ...(warning.includedBy?.length ? { includedBy: warning.includedBy.map((site) => ({ file: site.file ?? chapter, line: site.line, column: site.column })) } : {}) });
-      for (const dependency of expanded.dependencies) if (dependency.resolved && !includeDependencies.includes(dependency.id)) includeDependencies.push(dependency.id);
+      // A warning carries the path the directive wrote and the engine's own
+      // message, never the resolver's host path (C2-N include diagnostics).
+      for (const item of parsed.diagnostics) if (item.code.startsWith('include-')) includeWarnings.push(includeWarning(item, document, chapter, toAbsolute));
+      for (const dependency of includeDependencies_(parsed.document)) {
+        const file = toAbsolute(dependency);
+        if (file && !includeDependencies.includes(file)) includeDependencies.push(file);
+      }
     }
-    return (toAstJson(document) as unknown as AstNode).children ?? [];
+    return flattenIncludes(document.children ?? [], readSource, toAbsolute);
   });
-  return { document: { type: 'document', children }, manifest, publish: { ...(manifest.publish ?? {}), assetRoot: root }, includeWarnings, includeDependencies };
+  return { document: { type: 'document', astVersion: '2.0', children }, manifest, publish: { ...(manifest.publish ?? {}), assetRoot: root }, includeWarnings, includeDependencies };
+}
+
+function includeDependencies_(document: Parameters<typeof includeDependencies>[0]): string[] {
+  return includeDependencies(document).flatMap((dependency) => (dependency.read && typeof dependency.file === 'string' ? [dependency.file] : []));
 }
 
 export function publishBundle(document: AstNode, publish: PublishOptions, compile: CompileOptions, directory: string) {
