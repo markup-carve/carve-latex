@@ -1,6 +1,6 @@
 # carve-latex
 
-Convert Carve 0.1 documents to editable LaTeX or PDF with LuaLaTeX. The package uses the Carve JavaScript engine. See the [Carve documentation](https://markup-carve.github.io/carve/).
+Convert Carve 0.2 documents to editable LaTeX or PDF with LuaLaTeX. The package uses the Carve JavaScript engine (`@markup-carve/carve` 0.2, pinned by commit until it is released). See the [Carve documentation](https://markup-carve.github.io/carve/).
 
 ## Install
 

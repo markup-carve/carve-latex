@@ -33,7 +33,7 @@ carve-latex paper.crv --output paper.tex
 carve-latex paper.crv --pdf --output paper.pdf
 carve-latex book.crv --pdf --class book --toc --index \
   --bibliography references.bib --cite-style authoryear
-carve --json paper.crv | carve-latex - --from-json \
+carve ast paper.crv | carve-latex - --from-json \
   --output paper.tex --report fidelity.json
 carve-latex paper.crv --strict --output paper.tex
 carve-latex trusted.crv --allow-raw-latex --pdf
@@ -71,12 +71,34 @@ A `::: toc` block prints the table of contents where it stands instead of at the
 
 Supported document classes are `article`, `report`, `book`, and `thesis`. The bundled templates are starting points for publisher-specific work. A custom template uses placeholders such as `{{body}}`, `{{title}}`, `{{bibliographySetup}}`, and `{{indexPrint}}`. It must also define the highlight colors the bundled templates define: `carvekeyword`, `carvestring`, `carvenumber`, `carvecomment`, `carvevalue` and `carveseparator`.
 
+## Citations
+
+Carve 0.2 has no core citation syntax: `[@key]` is a mention. `carve-latex` registers the `:cite[key]` inline extension, and every parse in the package (single files and project chapters) uses it. The locator, a prefix, a suffix and the citation mode are attributes:
+
+```carve
+See :cite[doe2020] and :cite[doe2020]{locator="p. 4"}.
+As :cite[doe2020]{mode=author-in-text} argues, :cite[roe]{mode=suppress-author}.
+```
+
+`mode=author-in-text` prints `\textcite`, `mode=suppress-author` prints `\autocite*`, and the default prints `\autocite`. A tree written by an engine that did not register the matcher (`carve ast`) carries the unclaimed `cite` inline, which renders the same way.
+
+Definitions go in a `bibliography` or `references` directive as a description list, each term the key and its description the entry. A key with neither a definition, a `--bibliography` resource nor a CSL entry gets a stub record and a `citation-unresolved` diagnostic:
+
+```carve
+::: bibliography
+:: doe2020
+: Doe, J. A Book. 2020.
+:::
+```
+
+`carveExtensions()` returns the extension list for hosts that parse the source themselves.
+
 ## Publication features
 
 - section, chapter and heading numbering
 - labels and cross-references through `cleveref`
 - inline and numbered display mathematics with AMS packages
-- theorem, lemma, proposition, corollary, definition, proof and remark environments
+- theorem, lemma, proposition, corollary, definition, proof and remark environments (`::: theorem` and the other names are divs in 0.2; the eight notice kinds are admonitions)
 - typed BibLaTeX/Biber records, CSL JSON import, and explicit DOI lookup
 - figures, subfigure groups, short captions, placement, sizing, and tagged-PDF alternative text
 - multipage tables with captions, widths, repeated heads, and row/column spans; a head-row cell's alignment (`|={>} Price |`) sets its column, and a body cell's (`|{<} 12 |`) applies to that cell alone
@@ -104,7 +126,7 @@ publish:
   tableOfContents: true
 ```
 
-Chapters may pull in other files with `{{ path }}`. A project expands them under a containment root that defaults to the project root, resolving a nested path against the file that wrote it. `includeRoot` narrows that root and must be an absolute path: a relative one would be resolved against whatever directory the build ran in, so it is refused rather than guessed. `includes: false` in the manifest, or `--no-includes` on the command line, leaves the directives literal. A target outside the root, a missing one and a cycle each leave the directive as written and report a warning on stderr. The warning names the file the directive is written in, and a warning from a nested include adds the top-level directive that reached it (`(included from one.crv:3:1)`); `readProject()` returns that chain as `includedBy`.
+Chapters may pull in other files with `{{ path }}`. A project expands them under a containment root that defaults to the project root, resolving a nested path against the file that wrote it. `includeRoot` narrows that root and must be an absolute path: a relative one would be resolved against whatever directory the build ran in, so it is refused rather than guessed. `includes: false` in the manifest, or `--no-includes` on the command line, leaves the directives literal. A target outside the root, a missing one and a cycle each leave the directive as written and report a warning on stderr, under the engine's codes `include-outside-root`, `include-not-found` and `include-cycle`. The warning names the file the directive is written in, and a warning from a nested include adds the top-level directive that reached it (`(included from one.crv:3:1)`); `readProject()` returns that chain as `includedBy`.
 
 ```yaml
 version: 1
@@ -139,14 +161,14 @@ Every unsupported or target-specific construct is classified as `normalized`, `d
 ## Library
 
 ```js
-import { renderCarve, renderAst, compileCarve, readProject, reportToSarif } from '@markup-carve/carve-latex'
+import { renderCarve, renderAst, readAst, compileCarve, readProject, reportToSarif } from '@markup-carve/carve-latex'
 
 const rendered = renderCarve('# Paper\n\nText.')
-const fromAst = renderAst(canonicalAst, { documentClass: 'book' })
+const fromAst = renderAst(readAst(treeJson), { documentClass: 'book' })
 const compiled = compileCarve(source, { bibliography: ['refs.bib'] }, { output: 'paper.pdf' })
 ```
 
-The renderer consumes the canonical AST directly. It does not translate rendered HTML back into document structure.
+The renderer consumes the canonical tree (AST contract 2.0) directly. It does not translate rendered HTML back into document structure. `parseCarve()` returns that tree as JSON data, and `readAst()` validates a tree from elsewhere with the engine's `decodeTree`, so a 0.1 tree is refused instead of rendered wrong.
 
 ## Security
 

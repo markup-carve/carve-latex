@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { carveToHtml } from '@markup-carve/carve';
+import { render } from '@markup-carve/carve';
 import { renderCarve } from '../dist/index.js';
 
 /**
@@ -40,7 +40,7 @@ function crefs(source) {
 
 /** The ids the ENGINE assigns, read off its own HTML. */
 function engineIds(source) {
-  return [...carveToHtml(source).matchAll(/<section id="([^"]*)"/g)].map((m) => m[1]);
+  return [...render(source).matchAll(/<section id="([^"]*)"/g)].map((m) => m[1]);
 }
 
 test('a heading with an auto id gets a label, so a reference to it resolves', () => {

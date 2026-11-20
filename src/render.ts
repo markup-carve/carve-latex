@@ -1,17 +1,17 @@
-import { resolve as resolveReferences } from '@markup-carve/carve';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { encodeLiteralBlock, escapeIndex, escapeLatex, escapeUrl, safeLabel } from './escape.js';
 import { metadataOptions, readMetadata } from './metadata.js';
 import { applyTemplate, DEFAULT_TEMPLATE } from './template.js';
-import { cslToBiblatex } from './citations.js';
+import { CITE_EXTENSION, cslToBiblatex } from './citations.js';
 import type { AstNode, PublishOptions, PublishingDiagnostic, RenderResult } from './types.js';
 
 type Context = {
   options: Required<Pick<PublishOptions, 'documentClass' | 'paper' | 'margin' | 'numberedHeadings' | 'tableOfContents' | 'index' | 'glossaries'>> & PublishOptions;
   diagnostics: PublishingDiagnostic[];
   footnotes: Map<string, AstNode>;
+  inFigure?: boolean;
   citations: Set<string>;
   citationDefinitions: Map<string, AstNode>;
   abbreviations: Map<string, AstNode>;
@@ -19,7 +19,7 @@ type Context = {
 };
 
 const BLOCK_TYPES = new Set(['document', 'heading', 'paragraph', 'block_quote', 'list', 'definition_list',
-  'code_block', 'table', 'figure', 'figure_group', 'admonition', 'div', 'line_block', 'raw_block',
+  'code_block', 'table', 'figure_group', 'admonition', 'div', 'line_block', 'raw_block', 'section', 'include',
   'thematic_break', 'comment', 'footnote', 'link_reference_definition', 'abbreviation_def', 'citation_definition',
   'directive', 'block_extension']);
 
@@ -27,17 +27,9 @@ export function renderAst(document: AstNode, supplied: PublishOptions = {}): Ren
   if (document.type !== 'document') throw new TypeError(`Expected a Carve document AST, got ${document.type}`);
   const metadata = readMetadata(document);
   const options = defaults({ ...metadataOptions(metadata), ...supplied });
-  // The engine's own resolution pass, rather than a second copy of its rules
-  // here. It fills a heading's `attrs.id` with the id the engine assigns - a
-  // heading written `# 1. First` takes `s-1-First`, because an id may not open
-  // with a digit - and it gives a `heading_ref` an `href` only when the name
-  // resolves. Deriving either by hand is how a renderer drifts from the
-  // engine; both were wrong here before this call, and neither is a rule worth
-  // owning twice.
-  document = resolveDocument(document);
-  const context: Context = { options, diagnostics: [], footnotes: collect(document, 'footnote', 'label'),
-    citations: new Set(), citationDefinitions: collect(document, 'citation_definition', 'key'),
-    abbreviations: collect(document, 'abbreviation_def', 'abbr'), path: [] };
+  const context: Context = { options, diagnostics: [], footnotes: collect(document, 'footnote', 'key'),
+    citations: new Set(), citationDefinitions: citationDefinitions(document),
+    abbreviations: collect(document, 'abbreviation_def', 'key'), path: [] };
   const body = renderChildren(document.children ?? [], context, true);
   prepareBibliography(context);
   prepareGlossary(context);
@@ -85,28 +77,86 @@ function collect(document: AstNode, type: string, key: string): Map<string, AstN
 }
 
 /**
- * The document with names resolved, or the document unchanged.
- *
- * A caller may hand `renderAst` a tree it assembled itself (`--from-json`,
- * `readAst`), and a tree the engine refuses to resolve must still render the
- * way it did before rather than failing the whole run over a cross-reference.
+ * Citation definitions: a core `citation_definition` of a decoded tree, and the
+ * entries of a `bibliography` or `references` directive's description list,
+ * each term the key and its description the definition (C2-X-058).
  */
-function resolveDocument(document: AstNode): AstNode {
-  try {
-    const resolved = resolveReferences(document as never) as AstNode | undefined;
-    return resolved && resolved.type === 'document' ? resolved : document;
-  } catch {
-    return document;
-  }
+function citationDefinitions(document: AstNode): Map<string, AstNode> {
+  const values = collect(document, 'citation_definition', 'key');
+  visit(document, (node) => {
+    if (node.type !== 'directive' || !isBibliography(node)) return;
+    for (const list of node.children ?? []) {
+      if (list.type !== 'definition_list') continue;
+      let keys: string[] = [];
+      for (const item of list.children ?? []) {
+        if (item.type === 'definition_term') { keys.push(plain(item).trim()); continue; }
+        if (item.type !== 'definition_description') continue;
+        for (const key of keys) if (key && !values.has(key)) { const own = item.attrs ?? list.attrs; values.set(key, { ...item, type: 'citation_definition', key, ...(own ? { attrs: own } : {}) }); }
+        keys = [];
+      }
+    }
+  });
+  return values;
+}
+
+function isBibliography(node: AstNode): boolean { return node.kind === 'bibliography' || node.kind === 'references'; }
+
+/** The value of an authored `key=value` attribute (C2-A-032 keeps pairs in written order). */
+function attr(node: AstNode, name: string): string | undefined {
+  const pairs = (node.attrs as { keyValues?: unknown } | undefined)?.keyValues;
+  if (!Array.isArray(pairs)) return undefined;
+  for (const pair of pairs) if (Array.isArray(pair) && pair[0] === name && typeof pair[1] === 'string') return pair[1];
+  return undefined;
+}
+
+function attrs(node: AstNode): Record<string, string> {
+  const pairs = (node.attrs as { keyValues?: unknown } | undefined)?.keyValues;
+  const values: Record<string, string> = {};
+  if (Array.isArray(pairs)) for (const pair of pairs) if (Array.isArray(pair) && typeof pair[0] === 'string' && typeof pair[1] === 'string' && !(pair[0] in values)) values[pair[0]] = pair[1];
+  return values;
+}
+
+function classes(node: AstNode): string[] {
+  const value = (node.attrs as { classes?: unknown } | undefined)?.classes;
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function nodeId(node: AstNode): string | undefined {
+  const id = (node.attrs as { id?: unknown } | undefined)?.id ?? node.generatedId;
+  return typeof id === 'string' && id ? id : undefined;
+}
+
+/** A caption node's inline content: its blocks are paragraphs in practice, joined as one line. */
+function captionInlines(value: unknown): AstNode[] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const node = value as AstNode;
+  if (Array.isArray(value)) return value as AstNode[];
+  const blocks = node.children ?? [];
+  const inlines: AstNode[] = [];
+  blocks.forEach((block, index) => {
+    if (index > 0) inlines.push({ type: 'text', value: ' ' });
+    if (block.type === 'paragraph' || block.type === 'cell_paragraph') inlines.push(...(block.children ?? []));
+    else inlines.push({ type: 'text', value: plain(block) });
+  });
+  return inlines;
+}
+
+function shortCaption(value: unknown): AstNode[] | undefined {
+  const short = value && typeof value === 'object' && !Array.isArray(value) ? (value as AstNode).short : undefined;
+  return Array.isArray(short) ? short as AstNode[] : undefined;
 }
 
 function visit(node: AstNode, callback: (node: AstNode) => void): void {
   callback(node);
-  for (const key of ['children', 'items', 'rows', 'cells'] as const) for (const child of node[key] ?? []) visit(child, callback);
+  for (const child of node.children ?? []) visit(child, callback);
 }
 
 function renderChildren(nodes: AstNode[], context: Context, blocks = false): string {
-  const rendered = nodes.filter((node) => node.type !== 'frontmatter').map((node, index) => {
+  // A line comment inside a paragraph sits between two soft breaks; dropping it
+  // must leave one line break, as the HTML writer does.
+  const kept = nodes.filter((node, index) => node.type !== 'frontmatter'
+    && !(node.type === 'soft_break' && nodes[index - 1]?.type === 'comment' && nodes[index - 1]?.form === 'line'));
+  const rendered = kept.map((node, index) => {
     context.path.push(`${node.type}[${index}]`);
     const value = blocks || BLOCK_TYPES.has(node.type) ? renderBlock(node, context) : renderInline(node, context);
     context.path.pop();
@@ -116,17 +166,20 @@ function renderChildren(nodes: AstNode[], context: Context, blocks = false): str
 }
 
 function renderBlock(node: AstNode, context: Context): string {
+  // 0.2 has no figure node: a caption belongs to the block it describes (C2-A
+  // caption slots on paragraph, block_quote, code_block, table and include).
+  if (node.caption && node.type !== 'table' && !context.inFigure) return figure(node, context);
   switch (node.type) {
     case 'document': return renderChildren(node.children ?? [], context, true);
     case 'frontmatter': case 'footnote': case 'link_reference_definition': case 'abbreviation_def': case 'citation_definition': return '';
     case 'heading': return heading(node, context);
-    case 'paragraph': return renderChildren(node.children ?? [], context);
+    case 'paragraph': case 'cell_paragraph': return renderChildren(node.children ?? [], context);
+    case 'section': case 'include': return renderChildren(node.children ?? [], context, true);
     case 'block_quote': return environment('quote', renderChildren(node.children ?? [], context, true));
     case 'list': return list(node, context);
     case 'definition_list': return definitionList(node, context);
     case 'code_block': return codeBlock(node, context);
     case 'table': return table(node, context);
-    case 'figure': return figure(node, context);
     case 'image': return `\\begin{center}${imageCommand(node, context)}\\end{center}`;
     case 'list_item': return `\\item ${renderChildren(node.children ?? [], context, true).trim()}`;
     case 'definition_term': return renderChildren(node.children ?? [], context);
@@ -135,7 +188,7 @@ function renderBlock(node: AstNode, context: Context): string {
     case 'figure_group': return figureGroup(node, context);
     case 'admonition': return admonition(node, context);
     case 'div': return div(node, context);
-    case 'line_block': return environment('verse', renderChildren(node.children ?? [], context).replaceAll('\n', '\\\\\n'));
+    case 'line_block': return environment('verse', (node.children ?? []).filter((line) => line.type === 'line').map((line) => renderLine(line, context)).join('\\\\\n'));
     case 'raw_block': return raw(node, context, true);
     case 'thematic_break': return '\\par\\noindent\\rule{\\linewidth}{0.4pt}\\par';
     case 'comment': diagnostic(context, node, 'comment-dropped', 'Comments are not printed.', 'dropped'); return '';
@@ -151,7 +204,7 @@ function renderBlock(node: AstNode, context: Context): string {
 function renderInline(node: AstNode, context: Context): string {
   const content = () => renderChildren(node.children ?? [], context);
   switch (node.type) {
-    case 'text': case 'escaped_text': return escapeLatex(String(node.value ?? ''));
+    case 'text': return escapeLatex(String(node.value ?? ''));
     case 'emphasis': return command('emph', content());
     case 'strong': return command('textbf', content());
     case 'underline': return command('uline', content());
@@ -162,69 +215,99 @@ function renderInline(node: AstNode, context: Context): string {
     case 'superscript': return `\\textsuperscript{${content()}}`;
     case 'code': case 'literal_inline': return `\\texttt{${escapeLatex(String(node.value ?? plain(node)))}}`;
     case 'math': return math(node, context);
+    case 'cell_paragraph': return content();
     case 'link': return `\\href{${escapeUrl(String(node.href ?? ''))}}{${content()}}`;
     case 'autolink': return `\\url{${escapeUrl(String(node.href ?? node.value ?? ''))}}`;
     case 'image': return inlineImage(node, context);
     case 'footnote_ref': return footnoteReference(node, context);
-    case 'inline_footnote': return `\\footnote{${renderChildren((node.inline as AstNode[] | undefined) ?? [], context)}}`;
+    case 'inline_footnote': return `\\footnote{${content()}}`;
     case 'citation': return citation(node, context);
     case 'citation_group': return citationGroup(node, context);
-    case 'heading_ref': {
-      const target = String(node.target ?? node.id ?? plain(node));
-      // No `href` means the name resolved to nothing. Names compare case
-      // exactly (carve 0.1.8), so a reference whose case differs from its
-      // target lands here, and `\cref` to a label that was never written
-      // compiles to `??` with only a LaTeX warning. The other targets render an
-      // unresolved reference as its own source text, so this does too.
-      if (!String(node.href ?? '')) {
-        diagnostic(context, node, 'crossref-unresolved',
-          `No target carries the id "${target}", so the reference is written as text. Names compare case exactly.`,
-          'degraded');
-        return escapeLatex(`</#${target}>`);
-      }
-      return `\\cref{${safeLabel(target)}}`;
-    }
+    case 'xref': return xref(node, context);
     case 'caption_number':
       if (typeof node.n === 'number') return String(node.n);
       diagnostic(context, node, 'caption-number-normalized', 'A caption number outside the label position has no counter and was dropped.', 'normalized');
       return '';
     case 'hard_break': return '\\\\';
     case 'soft_break': return '\n';
-    // A table continuation-line join renders as one space (AST contract 1.1).
-    case 'cell_wrap': return ' ';
     case 'raw_inline': return raw(node, context, false);
     case 'comment': case 'critic_comment': diagnostic(context, node, 'comment-dropped', 'Comments are not printed.', 'dropped'); return '';
-    case 'mention': return `@${escapeLatex(String(node.user ?? node.name ?? ''))}`;
+    case 'mention': return `@${escapeLatex(String(node.target ?? ''))}`;
     case 'tag': {
       const name = String(node.name ?? '');
-      const action = node.attrs?.indexRange === 'start' ? '|(' : node.attrs?.indexRange === 'end' ? '|)' : typeof node.attrs?.see === 'string' ? `|see{${escapeIndex(node.attrs.see)}}` : '';
-      const indexName = typeof node.attrs?.indexName === 'string' && context.options.indexes?.includes(node.attrs.indexName) ? `[${safeLabel(node.attrs.indexName)}]` : '';
+      const range = attr(node, 'indexRange'); const see = attr(node, 'see'); const indexName_ = attr(node, 'indexName');
+      const action = range === 'start' ? '|(' : range === 'end' ? '|)' : see !== undefined ? `|see{${escapeIndex(see)}}` : '';
+      const indexName = indexName_ !== undefined && context.options.indexes?.includes(indexName_) ? `[${safeLabel(indexName_)}]` : '';
       return `\\#${escapeLatex(name)}${context.options.index ? `\\index${indexName}{${escapeIndex(name)}${action}}` : ''}`;
     }
-    case 'symbol': return escapeLatex(String(node.value ?? node.name ?? ''));
+    // A symbol name has no glyph without a host symbol table, so it keeps its source spelling.
+    case 'symbol': return escapeLatex(`:${String(node.name ?? '')}:`);
     case 'abbreviation': {
-      const abbr = String(node.abbr ?? '');
+      const abbr = String(node.key ?? '');
       return context.options.glossaries && context.abbreviations.has(abbr) ? `\\gls{${safeLabel(abbr)}}` : `\\textsc{${escapeLatex(abbr)}}`;
     }
-    case 'span': case 'inline_extension': return content();
+    case 'span': return content();
+    case 'inline_extension': return inlineExtension(node, context);
     case 'small_caps': return command('textsc', content());
     case 'ruby': return ruby(node, context);
-    case 'smart_punctuation': return escapeLatex(String(node.value ?? ''));
+    case 'smart_punctuation': return escapeLatex(String(node.glyph ?? ''));
     case 'non_breaking_space': return '~';
-    // Both halves are inline arrays, and an empty one is `[]`, so it must not
-    // leave a bare `\sout{}` behind. The commands match `delete` and `insert`
-    // above, which is the pairing the reference ANSI and HTML renderers show.
-    case 'substitution': {
-      const half = (key: 'old' | 'new', name: string) => {
-        const nodes = (node[key] as AstNode[] | undefined) ?? [];
-        return nodes.length > 0 ? command(name, renderChildren(nodes, context)) : '';
-      };
-      return `${half('old', 'sout')}${half('new', 'uline')}`;
-    }
     default:
       diagnostic(context, node, 'unsupported-inline', `Unsupported inline ${node.type} was flattened.`, 'degraded');
       return content() || escapeLatex(String(node.value ?? ''));
   }
+}
+
+// No `href` means the name resolved to nothing. Names compare case exactly,
+// so a reference whose case differs from its target lands here, and `\cref`
+// to a label never written compiles to `??` with only a LaTeX warning; it is
+// written as its own source text instead, as the HTML writer does.
+function xref(node: AstNode, context: Context): string {
+  const key = String(node.key ?? '');
+  const namespace = String(node.namespace ?? 'heading');
+  if (namespace === 'footnote') return footnoteReference(node, context);
+  if (namespace === 'citation') return citation(node, context);
+  if (!String(node.href ?? '')) {
+    diagnostic(context, node, 'crossref-unresolved',
+      `No target carries the id "${key}", so the reference is written as text. Names compare case exactly.`,
+      'degraded');
+    return escapeLatex(`</#${key}>`);
+  }
+  return `\\cref{${safeLabel(key)}}`;
+}
+
+// The host-registered `:cite[key]` extension prints as a citation; any other
+// extension this renderer does not implement prints the fallback it promised
+// (C2-X-023), or its children when it has none.
+function inlineExtension(node: AstNode, context: Context): string {
+  // A tree from an engine that did not register the matcher (`carve ast`)
+  // carries the unclaimed `cite` inline with the key as its text.
+  const props = node.name === 'cite' ? { ...attrs(node), key: plain(node).trim() } : (node.props as Record<string, unknown> | undefined) ?? {};
+  if ((node.name === CITE_EXTENSION || node.name === 'cite') && typeof props.key === 'string' && props.key) {
+    const words = (value: unknown) => (typeof value === 'string' && value ? [{ type: 'text', value }] : undefined);
+    const mode = props.mode === 'author-in-text' || props.mode === 'suppress-author' ? props.mode : undefined;
+    return citation({ type: 'citation', key: props.key, ...(words(props.prefix) ? { prefix: words(props.prefix) } : {}),
+      ...(words(props.locator) ? { locator: { children: words(props.locator) } } : {}),
+      ...(words(props.suffix) ? { suffix: words(props.suffix) } : {}), ...(mode ? { mode } : {}), pos: node.pos }, context);
+  }
+  if ((node.children ?? []).length > 0) return renderChildren(node.children ?? [], context);
+  const fallback = node.fallback as AstNode[] | undefined;
+  if (Array.isArray(fallback) && fallback.length > 0) {
+    if (node.name !== 'abbr') diagnostic(context, node, 'inline-extension-fallback-rendered', `Inline extension ${String(node.name ?? 'unknown')} rendered its fallback.`, 'degraded');
+    return renderChildren(fallback, context);
+  }
+  diagnostic(context, node, 'unsupported-inline', `Inline extension ${String(node.name ?? 'unknown')} has no fallback and was dropped.`, 'dropped');
+  return '';
+}
+
+// A line keeps its leading spaces as text (C2-A line_block); each prints as a
+// non-breaking space so the indentation survives TeX's space collapsing.
+function renderLine(line: AstNode, context: Context): string {
+  const [first, ...rest] = line.children ?? [];
+  if (first?.type !== 'text') return renderChildren(line.children ?? [], context);
+  const value = String(first.value ?? '');
+  const indent = value.length - value.trimStart().length;
+  return '~'.repeat(indent) + renderChildren([{ ...first, value: value.slice(indent) }, ...rest], context);
 }
 
 // A kernel-only stack, so the preamble needs nothing: the CTAN `ruby` package
@@ -244,25 +327,26 @@ function heading(node: AstNode, context: Context): string {
   const names = book ? ['chapter', 'section', 'subsection', 'subsubsection', 'paragraph', 'subparagraph'] : ['section', 'subsection', 'subsubsection', 'paragraph', 'subparagraph', 'subparagraph'];
   const name = names[level - 1] ?? 'paragraph';
   const star = context.options.numberedHeadings ? '' : '*';
-  const id = node.id ?? node.attrs?.id;
-  const label = id ? `\\label{${safeLabel(String(id))}}` : '';
+  const id = nodeId(node);
+  const label = id ? `\\label{${safeLabel(id)}}` : '';
   return `\\${name}${star}{${renderChildren(node.children ?? [], context)}}${label}`;
 }
 
 function list(node: AstNode, context: Context): string {
-  const ordered = node.ordered === true;
+  const listMarker = (node.marker as { kind?: string; start?: number } | undefined) ?? {};
+  const ordered = listMarker.kind === 'ordered';
   const name = ordered ? 'enumerate' : 'itemize';
-  const start = ordered && typeof node.start === 'number' && node.start !== 1 ? `\n\\setcounter{enumi}{${node.start - 1}}` : '';
-  const items = (node.items ?? node.children ?? []).map((item) => {
-    const task = item.checked !== undefined || item.taskState !== undefined;
-    const marker = task ? (item.checked === true ? '$\\boxtimes$ ' : '$\\square$ ') : '';
+  const start = ordered && typeof listMarker.start === 'number' && listMarker.start !== 1 ? `\n\\setcounter{enumi}{${listMarker.start - 1}}` : '';
+  const items = (node.children ?? []).map((item) => {
+    const task = item.task as { mark?: string } | undefined;
+    const marker = task ? (task.mark && task.mark.trim() ? '$\\boxtimes$ ' : '$\\square$ ') : '';
     return `\\item ${marker}${renderChildren(item.children ?? [], context, true).trim()}`;
   }).join('\n');
   return `\\begin{${name}}${start}\n${items}\n\\end{${name}}`;
 }
 
 function definitionList(node: AstNode, context: Context): string {
-  const children = node.items ?? node.children ?? [];
+  const children = (node.children ?? []).filter((item) => item.type !== 'comment');
   let value = '\\begin{description}\n';
   let terms: AstNode[] = [];
   for (const item of children) {
@@ -276,14 +360,14 @@ function definitionList(node: AstNode, context: Context): string {
 }
 
 function codeBlock(node: AstNode, context: Context): string {
-  // carve 0.1.8 moved the payload's terminating newline into `content`, and the
+  // The payload's terminating newline is part of `value`, and the
   // template below supplies the newline before \end. Drop exactly that one byte:
   // a code payload's other bytes are meaningful, so an authored blank final line
   // survives. Only code_block changed; raw_block and math still end at the last
   // payload character.
-  const payload = String(node.value ?? node.content ?? plain(node));
+  const payload = String(node.value ?? plain(node));
   const value = payload.endsWith('\n') ? payload.slice(0, -1) : payload;
-  const languageName = String(node.lang ?? '').toLowerCase();
+  const languageName = String(node.syntax ?? '').toLowerCase();
   const diagram = ['mermaid', 'chart', 'vega', 'plantuml'].includes(languageName);
   if (diagram) {
     diagnostic(context, node, 'diagram-source-degraded', `${languageName} is printed as source; pre-render it to an image for publication.`, 'degraded');
@@ -374,22 +458,23 @@ function withoutNumberLabel(nodes: AstNode[]): AstNode[] {
 }
 
 function table(node: AstNode, context: Context): string {
-  const rows = node.rows ?? node.children ?? [];
-  const columns = Math.max(1, ...rows.map((row) => (row.cells ?? row.children ?? []).length));
-  const columnsMetadata = (node.columns as Array<Record<string, unknown>> | undefined) ?? [];
-  const explicitHeadRows = (node.rowGroups as { headRows?: number } | undefined)?.headRows;
-  const headRows = typeof explicitHeadRows === 'number' ? explicitHeadRows : headRowRun(rows);
+  // C2-A table: head, body and foot groups hold the rows; the head group is the repeated header.
+  const groups = (node.children ?? []).filter((group) => group.type === 'table_head' || group.type === 'table_body' || group.type === 'table_foot');
+  const rows = groups.flatMap((group) => (group.children ?? []).filter((row) => row.type === 'table_row'));
+  const columns = Math.max(1, ...rows.map((row) => (row.children ?? []).length));
+  const columnsMetadata = ((node.columns as Array<Record<string, unknown>> | undefined) ?? []).map((column) => ({ ...column, align: column.align ?? column.resolvedAlign, valign: column.valign ?? column.resolvedValign }));
+  const headRows = groups.filter((group) => group.type === 'table_head').reduce((count, group) => count + (group.children ?? []).filter((row) => row.type === 'table_row').length, 0);
   // CARVE-P12-040: only a head-row header cell, or an aligned placeholder in a
   // head row, sets its own physical column's default; a body cell's symbols stay local.
   const alignmentNames = Array.from({ length: columns }, (_, index) => alignmentName(columnsMetadata[index]?.align));
-  rows.slice(0, headRows).forEach((row) => (row.cells ?? row.children ?? []).forEach((cell, index) => {
+  rows.slice(0, headRows).forEach((row) => (row.children ?? []).forEach((cell, index) => {
     const align = alignmentName(cell.align);
     if (align && index < columns && (cell.header === true || cell.span !== undefined)) alignmentNames[index] = align;
   }));
   const columnSpecs = alignmentNames.map((name, index) => columnSpec(name, columnsMetadata[index]));
   const spans = resolveSpans(rows);
   const lines = rows.map((row, rowIndex) => {
-    const cells = row.cells ?? row.children ?? [];
+    const cells = row.children ?? [];
     const values: string[] = [];
     for (let column = 0; column < cells.length; column += 1) {
       const cell = cells[column]!;
@@ -397,7 +482,7 @@ function table(node: AstNode, context: Context): string {
       if (span.covered === 'row') { values.push(''); continue; }
       if (span.covered === 'column') continue;
       const { colspan, rowspan } = span;
-      let rendered = renderChildren(cell.children ?? [], context);
+      let rendered = (cell.children ?? []).map((block) => block.type === 'cell_paragraph' || block.type === 'paragraph' ? renderChildren(block.children ?? [], context) : renderBlock(block, context)).join(' ');
       if (rowspan > 1) rendered = `\\multirow{${rowspan}}{*}{${rendered}}`;
       const align = alignmentName(cell.align) ?? alignmentNames[column];
       if (colspan > 1) rendered = `\\multicolumn{${colspan}}{${columnSpec(align, undefined)}}{${rendered}}`;
@@ -410,22 +495,13 @@ function table(node: AstNode, context: Context): string {
     const ruled = headRows > 0 ? rowIndex === headRows - 1 : rowIndex === 0 && cells.some((cell) => cell.header === true);
     return `${values.join(' & ')} \\\\${ruled ? ' \\midrule' : ''}`;
   });
-  const captionText = Array.isArray(node.caption) ? `\\caption${Array.isArray(node.shortCaption) ? `[${caption(node.shortCaption as AstNode[], context)}]` : ''}{${caption(node.caption as AstNode[], context)}} \\\\\n` : '';
+  const captionNodes = captionInlines(node.caption); const short = shortCaption(node.caption);
+  const captionText = captionNodes ? `\\caption${short ? `[${caption(short, context)}]` : ''}{${caption(captionNodes, context)}} \\\\\n` : '';
   const repeatedHead = headRows > 0 ? `\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\endfirsthead\n\\toprule\n${lines.slice(0, headRows).join('\n')}\n\\endhead\n${lines.slice(headRows).join('\n')}` : `\\toprule\n${lines.join('\n')}`;
-  const note = typeof node.attrs?.note === 'string' ? `\n\\multicolumn{${columns}}{l}{\\footnotesize ${escapeLatex(node.attrs.note)}} \\\\` : '';
+  const tableNote = attr(node, 'note');
+  const note = tableNote !== undefined ? `\n\\multicolumn{${columns}}{l}{\\footnotesize ${escapeLatex(tableNote)}} \\\\` : '';
   const renderedTable = `\\begin{longtable}{${columnSpecs.join('')}}\n${captionText}${repeatedHead}${note}\n\\bottomrule\n\\end{longtable}`;
-  return node.attrs?.landscape === true ? environment('landscape', renderedTable) : renderedTable;
-}
-
-// PART 9 §5 T9: the head is the leading run of rows whose every owned cell is a header.
-function headRowRun(rows: AstNode[]): number {
-  let count = 0;
-  for (const row of rows) {
-    const cells = row.cells ?? row.children ?? [];
-    if (!cells.some((cell) => cell.header === true) || !cells.every((cell) => cell.header === true || cell.span !== undefined)) break;
-    count += 1;
-  }
-  return count;
+  return attr(node, 'landscape') === 'true' || classes(node).includes('landscape') ? environment('landscape', renderedTable) : renderedTable;
 }
 
 function alignmentName(value: unknown): 'left' | 'center' | 'right' | undefined {
@@ -433,7 +509,7 @@ function alignmentName(value: unknown): 'left' | 'center' | 'right' | undefined 
 }
 
 function columnSpec(align: string | undefined, column: Record<string, unknown> | undefined, valign = column?.valign): string {
-  if (typeof column?.width !== 'number') return ({ center: 'c', right: 'r' } as Record<string, string>)[align ?? ''] ?? 'l';
+  if (typeof column?.width !== 'number' || column.width <= 0) return ({ center: 'c', right: 'r' } as Record<string, string>)[align ?? ''] ?? 'l';
   const family = valign === 'middle' ? 'm' : valign === 'bottom' ? 'b' : 'p';
   const alignment = align === 'right' ? '>{\\raggedleft\\arraybackslash}' : align === 'center' ? '>{\\centering\\arraybackslash}' : '>{\\raggedright\\arraybackslash}';
   return `${alignment}${family}{${Math.max(0.01, Math.min(1, column.width))}\\linewidth}`;
@@ -443,10 +519,10 @@ type SpanSlot = { rowspan: number; colspan: number; covered?: 'row' | 'column' }
 
 // The PART 9 §13 T5 walk as carve-js runs it: a marker with no origin, or whose span would cover another cell, stays a cell.
 function resolveSpans(rows: AstNode[]): SpanSlot[][] {
-  const grid = rows.map((row) => (row.cells ?? row.children ?? []).map((): SpanSlot => ({ rowspan: 1, colspan: 1 })));
+  const grid = rows.map((row) => (row.children ?? []).map((): SpanSlot => ({ rowspan: 1, colspan: 1 })));
   const cover: Array<Array<[number, number] | undefined>> = [];
   rows.forEach((row, r) => {
-    const cells = row.cells ?? row.children ?? [];
+    const cells = row.children ?? [];
     const own: Array<[number, number] | undefined> = (cover[r] = []);
     cells.forEach((cell, c) => {
       const slot = grid[r]![c]!;
@@ -470,46 +546,52 @@ function resolveSpans(rows: AstNode[]): SpanSlot[][] {
   return grid;
 }
 
+// A captioned block: an image paragraph (C2-A `role: "image"`) prints its
+// images, any other block prints itself, inside one floating figure.
+function figureBody(node: AstNode, context: Context): string {
+  if (node.type === 'paragraph' && node.role === 'image') {
+    return (node.children ?? []).filter((child) => child.type === 'image').map((image) => imageCommand(image, context)).join('\n');
+  }
+  context.inFigure = true;
+  try { return renderBlock(node, context); } finally { context.inFigure = false; }
+}
+
 function figure(node: AstNode, context: Context): string {
-  const target = node.target as AstNode | undefined;
-  const rendered = target ? (target.type === 'image' ? imageCommand(target, context) : renderBlock(target, context)) : renderChildren(node.children ?? [], context, true);
-  const captionNodes = node.caption as AstNode[] | undefined;
-  const short = Array.isArray(node.shortCaption) ? `[${renderChildren(node.shortCaption as AstNode[], context)}]` : '';
+  const rendered = figureBody(node, context);
+  const captionNodes = captionInlines(node.caption); const shortNodes = shortCaption(node.caption);
+  const short = shortNodes ? `[${renderChildren(shortNodes, context)}]` : '';
   const captionText = captionNodes ? `\n\\caption${short}{${caption(captionNodes, context)}}` : '';
-  const id = node.id ?? node.attrs?.id;
-  const label = id ? `\n\\label{${safeLabel(String(id))}}` : '';
-  const placement = /^(?:h|t|b|p|!)+$/.test(String(node.attrs?.placement ?? '')) ? String(node.attrs?.placement) : 'htbp';
+  const id = nodeId(node) ?? nodeId(node.caption as AstNode ?? { type: 'caption' });
+  const label = id ? `\n\\label{${safeLabel(id)}}` : '';
+  const placementValue = attr(node, 'placement') ?? '';
+  const placement = /^(?:h|t|b|p|!)+$/.test(placementValue) ? placementValue : 'htbp';
   return `\\begin{figure}[${placement}]\n\\centering\n${rendered}${captionText}${label}\n\\end{figure}`;
 }
 
 function figureGroup(node: AstNode, context: Context): string {
-  const rendered = (node.children ?? []).map((panel) => `\\begin{minipage}{0.48\\linewidth}\n\\centering\n${panel.type === 'figure' ? figureTarget(panel, context) : renderBlock(panel, context)}\n\\end{minipage}`).join('\\hfill\n');
-  const captionText = Array.isArray(node.caption) ? `\n\\caption{${caption(node.caption as AstNode[], context)}}` : '';
+  const rendered = (node.children ?? []).map((panel) => `\\begin{minipage}{0.48\\linewidth}\n\\centering\n${figureTarget(panel, context)}\n\\end{minipage}`).join('\\hfill\n');
+  const captionNodes = captionInlines(node.caption);
+  const captionText = captionNodes ? `\n\\caption{${caption(captionNodes, context)}}` : '';
   return `\\begin{figure}[htbp]\n\\centering\n${rendered}${captionText}\n\\end{figure}`;
 }
 
 function figureTarget(node: AstNode, context: Context): string {
-  const target = node.target as AstNode | undefined;
-  const body = target ? (target.type === 'image' ? imageCommand(target, context) : renderBlock(target, context)) : '';
-  const captionText = Array.isArray(node.caption) ? `\n\\captionof{subfigure}{${caption(node.caption as AstNode[], context)}}` : '';
+  const body = figureBody(node, context);
+  const captionNodes = captionInlines(node.caption);
+  const captionText = captionNodes ? `\n\\captionof{subfigure}{${caption(captionNodes, context)}}` : '';
   return `${body}${captionText}`;
 }
 
-// The engine makes every `::: word` an admonition, so this is also the only
-// path a structural container arrives by.
+// 0.2 makes the eight notice kinds an admonition; every other `::: word` is a
+// div whose first class is the word, so theorem and structural containers
+// arrive through `div`.
 const THEOREM_KINDS = ['theorem', 'lemma', 'proposition', 'corollary', 'definition', 'proof', 'remark'];
 const NOTICE_KINDS = ['note', 'tip', 'warning', 'danger', 'info', 'success', 'example', 'quote'];
 const STRUCTURAL_KINDS = ['abstract', 'acknowledgements', 'epigraph', 'appendix', 'appendices'];
 
 function admonition(node: AstNode, context: Context): string {
-  const kind = String(node.kind ?? node.name ?? node.variant ?? 'remark').toLowerCase();
+  const kind = String(node.kind ?? 'remark').toLowerCase();
   const title = Array.isArray(node.title) ? renderChildren(node.title as AstNode[], context).trim() : '';
-  if (STRUCTURAL_KINDS.includes(kind)) {
-    // \begin{abstract} and \appendix take no title, so say so rather than
-    // dropping the author's words in silence.
-    if (title) diagnostic(context, node, 'admonition-title-dropped', `The ${kind} container cannot carry a title.`, 'dropped');
-    return div({ ...node, name: kind }, context);
-  }
   // A notice kind gets its own environment so a warning does not print
   // "Remark". Theorem kinds keep the names the templates already declare.
   const name = THEOREM_KINDS.includes(kind) ? kind : NOTICE_KINDS.includes(kind) ? `carve${kind}` : undefined;
@@ -521,13 +603,22 @@ function admonition(node: AstNode, context: Context): string {
 }
 
 function div(node: AstNode, context: Context): string {
-  const name = String(node.name ?? node.kind ?? '');
-  if (name === 'appendix' || name === 'appendices') return `\\appendix\n${renderChildren(node.children ?? [], context, true)}`;
-  if (name === 'abstract' || name === 'acknowledgements') return environment(name === 'abstract' ? 'abstract' : 'quote', renderChildren(node.children ?? [], context, true));
-  if (name === 'epigraph') return `\\begin{flushright}\\itshape\n${renderChildren(node.children ?? [], context, true)}\\end{flushright}`;
-  if (['theorem', 'lemma', 'proposition', 'corollary', 'definition', 'proof', 'remark'].includes(name)) return environment(name, renderChildren(node.children ?? [], context, true));
+  const name = (classes(node)[0] ?? '').toLowerCase();
+  const title = Array.isArray(node.title) ? renderChildren(node.title as AstNode[], context).trim() : '';
+  const body = () => renderChildren(node.children ?? [], context, true);
+  if (STRUCTURAL_KINDS.includes(name)) {
+    // \begin{abstract} and \appendix take no title, so say so rather than
+    // dropping the author's words in silence.
+    if (title) diagnostic(context, node, 'admonition-title-dropped', `The ${name} container cannot carry a title.`, 'dropped');
+    if (name === 'appendix' || name === 'appendices') return `\\appendix\n${body()}`;
+    if (name === 'abstract' || name === 'acknowledgements') return environment(name === 'abstract' ? 'abstract' : 'quote', body());
+    return `\\begin{flushright}\\itshape\n${body()}\\end{flushright}`;
+  }
+  // Braced, because an amsthm optional argument ends at the first unbraced `]`
+  // and a title may legitimately contain one.
+  if (THEOREM_KINDS.includes(name)) return environment(name, body(), title ? `[{${title}}]` : '');
   diagnostic(context, node, 'container-flattened', `Container ${name || 'div'} was flattened without its visual wrapper.`, 'degraded');
-  return renderChildren(node.children ?? [], context, true);
+  return body();
 }
 
 // A generated-content placement (`::: toc`, `::: footnotes`, ...). Footnotes
@@ -537,7 +628,8 @@ function directive(node: AstNode, context: Context): string {
   if (Array.isArray(node.title) && node.title.length > 0) {
     diagnostic(context, node, 'directive-title-dropped', `The ${kind} placement cannot carry a title.`, 'dropped');
   }
-  const body = (node.children ?? []).length > 0 ? renderChildren(node.children ?? [], context, true) : '';
+  const children = isBibliography(node) ? (node.children ?? []).filter((child) => child.type !== 'definition_list') : node.children ?? [];
+  const body = children.length > 0 ? renderChildren(children, context, true) : '';
   if (kind === 'toc') {
     // Printed here instead of at the template's slot, never twice.
     context.options.tableOfContents = false;
@@ -555,13 +647,13 @@ function directive(node: AstNode, context: Context): string {
 // the extension promised every renderer that does not implement it.
 function blockExtension(node: AstNode, context: Context): string {
   const name = String(node.name ?? 'unknown');
-  const fallback = node.fallback as AstNode | undefined;
-  if (fallback && typeof fallback === 'object' && typeof fallback.type === 'string') {
+  const fallback = node.fallback as AstNode[] | undefined;
+  if (Array.isArray(fallback) && fallback.length > 0) {
     diagnostic(context, node, 'block-extension-fallback-rendered', `Block extension ${name} rendered its fallback.`, 'degraded');
-    return renderChildren([fallback], context, true).trim();
+    return renderChildren(fallback, context, true).trim();
   }
-  const payload = node.payload as { value?: unknown } | undefined;
-  const value = typeof payload?.value === 'string' ? payload.value : '';
+  const payload = node.payload as Array<{ value?: unknown }> | undefined;
+  const value = Array.isArray(payload) ? payload.map((item) => (typeof item?.value === 'string' ? item.value : '')).join('') : '';
   if (!value) {
     diagnostic(context, node, 'block-extension-dropped', `Block extension ${name} has no fallback and was dropped.`, 'dropped');
     return '';
@@ -572,7 +664,7 @@ function blockExtension(node: AstNode, context: Context): string {
 
 function raw(node: AstNode, context: Context, block: boolean): string {
   const format = String(node.format ?? '').toLowerCase();
-  const value = String(node.value ?? node.content ?? '');
+  const value = String(node.value ?? '');
   if ((format === 'latex' || format === 'tex') && context.options.allowRawLatex) return value;
   if (format === 'latex' || format === 'tex') {
     diagnostic(context, node, 'raw-latex-disabled', 'Raw LaTeX is visible but inert; enable it explicitly only for trusted input.', 'degraded');
@@ -583,7 +675,7 @@ function raw(node: AstNode, context: Context, block: boolean): string {
 }
 
 function math(node: AstNode, context: Context): string {
-  const value = String(node.content ?? node.value ?? plain(node));
+  const value = String(node.value ?? plain(node));
   const allowed = new Set(['frac', 'dfrac', 'tfrac', 'sqrt', 'sum', 'prod', 'int', 'iint', 'iiint', 'oint', 'lim', 'log', 'ln', 'exp', 'sin', 'cos', 'tan', 'min', 'max', 'inf', 'sup', 'det', 'gcd', 'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta', 'theta', 'vartheta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'pi', 'varpi', 'rho', 'varrho', 'sigma', 'varsigma', 'tau', 'upsilon', 'phi', 'varphi', 'chi', 'psi', 'omega', 'Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Pi', 'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega', 'mathrm', 'mathbf', 'mathit', 'mathsf', 'mathtt', 'mathcal', 'mathbb', 'mathfrak', 'operatorname', 'text', 'left', 'right', 'big', 'Big', 'bigg', 'Bigg', 'cdot', 'times', 'div', 'pm', 'mp', 'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'approx', 'equiv', 'in', 'notin', 'subset', 'subseteq', 'supset', 'supseteq', 'cup', 'cap', 'land', 'lor', 'neg', 'forall', 'exists', 'partial', 'nabla', 'infty', 'ell', 'hbar', 'prime', 'dots', 'ldots', 'cdots', 'vdots', 'ddots', 'overline', 'underline', 'hat', 'widehat', 'bar', 'vec', 'dot', 'ddot', 'binom']);
   const permittedEnvironments = /\\(?:begin|end)\{(?:matrix\*?|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|aligned|gathered|split)\}/g;
   const commands = [...value.replace(permittedEnvironments, '').matchAll(/\\([A-Za-z@]+|.)/g)].map((match) => match[1]!);
@@ -592,8 +684,8 @@ function math(node: AstNode, context: Context): string {
     diagnostic(context, node, 'unsafe-math-degraded', 'Potentially executable TeX in math was rendered as inert text.', 'degraded');
     return `\\texttt{${escapeLatex(value)}}`;
   }
-  const id = node.attrs?.id;
-  if (node.display === true && id) return `\\begin{equation}\\label{${safeLabel(String(id))}}\n${value}\n\\end{equation}`;
+  const id = nodeId(node);
+  if (node.display === true && id) return `\\begin{equation}\\label{${safeLabel(id)}}\n${value}\n\\end{equation}`;
   return node.display === true ? `\\[${value}\\]` : `\\(${value}\\)`;
 }
 
@@ -601,7 +693,7 @@ function literalBlock(value: string): string { return `\\begin{carvecode}\n${enc
 
 function inlineImage(node: AstNode, context: Context): string { return imageCommand(node, context); }
 function imageCommand(node: AstNode, context: Context): string {
-  const source = String(node.src ?? node.href ?? '');
+  const source = String(node.src ?? '');
   if (/^(?:https?:|data:)/i.test(source)) {
     diagnostic(context, node, 'remote-image-dropped', `Remote image ${source} must be downloaded explicitly.`, 'dropped');
     return `\\fbox{${escapeLatex(String(node.alt ?? 'image'))}}`;
@@ -609,46 +701,55 @@ function imageCommand(node: AstNode, context: Context): string {
   const path = context.options.assetRoot && !isAbsolute(source) ? resolve(context.options.assetRoot, source) : source;
   const safePath = path.replaceAll('\\', '/').replace(/[{}%#\r\n]/g, '');
   if (safePath !== path) diagnostic(context, node, 'image-path-normalized', 'TeX-special characters were removed from the local image path.', 'normalized');
-  const authoredWidth = node.attrs?.width;
-  const width = typeof authoredWidth === 'number' && authoredWidth > 0 && authoredWidth <= 1 ? `${authoredWidth}\\linewidth` : typeof authoredWidth === 'string' && /^\d+(?:\.\d+)?(?:mm|cm|in|pt)$/.test(authoredWidth) ? authoredWidth : '\\linewidth';
+  const authoredWidth = attr(node, 'width') ?? '';
+  const fraction = /^(?:0?\.\d+|1(?:\.0+)?|0)$/.test(authoredWidth) ? Number(authoredWidth) : NaN;
+  const width = fraction > 0 && fraction <= 1 ? `${fraction}\\linewidth` : /^\d+(?:\.\d+)?(?:mm|cm|in|pt)$/.test(authoredWidth) ? authoredWidth : '\\linewidth';
   const graphic = `\\includegraphics[width=${width}]{\\detokenize{${safePath}}}`;
   return context.options.taggedPdf ? `\\tagstructbegin[tag=Figure,alttext={${escapeLatex(String(node.alt ?? ''))}}]${graphic}\\tagstructend` : graphic;
 }
 
 function footnoteReference(node: AstNode, context: Context): string {
-  const label = String(node.label ?? node.id ?? ''); const definition = context.footnotes.get(label);
+  const label = String(node.key ?? ''); const definition = context.footnotes.get(label);
   if (!definition) { diagnostic(context, node, 'footnote-unresolved', `Footnote ${label} has no definition.`, 'degraded'); return `[^${escapeLatex(label)}]`; }
   return `\\footnote{${renderChildren(definition.children ?? [], context, true).trim()}}`;
 }
 
 function citation(node: AstNode, context: Context): string {
-  const key = safeLabel(String(node.key ?? node.id ?? node.label ?? 'citation'));
+  const key = safeLabel(String(node.key ?? 'citation'));
   context.citations.add(key);
   const prefixValue = Array.isArray(node.prefix) ? renderChildren(node.prefix as AstNode[], context) : '';
-  const locator = typeof node.locatorValue === 'string' ? node.locatorValue : Array.isArray(node.locator) ? renderChildren(node.locator as AstNode[], context) : '';
+  const locatorNode = node.locator as { label?: string; children?: AstNode[] } | undefined;
+  const locatorText = Array.isArray(locatorNode?.children) ? renderChildren(locatorNode.children, context) : '';
+  const locator = locatorText && locatorNode?.label ? `${escapeLatex(locatorNode.label)} ${locatorText}` : locatorText;
   const suffixValue = Array.isArray(node.suffix) ? renderChildren(node.suffix as AstNode[], context) : '';
   const prefix = prefixValue ? `[${prefixValue}]` : '';
   const suffix = locator || suffixValue ? `[${[locator, suffixValue].filter(Boolean).join(', ')}]` : '';
-  const mode = node.mode === 'integral' || node.suppressAuthor === false && node.integral === true ? 'textcite' : node.suppressAuthor === true ? 'autocite*' : 'autocite';
+  const mode = node.mode === 'author-in-text' ? 'textcite' : node.mode === 'suppress-author' ? 'autocite*' : 'autocite';
   return `\\${mode}${prefix}${suffix}{${key}}`;
 }
 
 function citationGroup(node: AstNode, context: Context): string {
-  const citations = (node.children ?? node.items ?? []).filter((child) => child.type === 'citation');
+  const citations = (node.children ?? []).filter((child) => child.type === 'citation');
   if (citations.length === 0) return renderChildren(node.children ?? [], context);
-  return citations.map((item, index) => citation(node.mode === 'integral' && index === 0 ? { ...item, integral: true } : item, context)).join('');
+  return citations.map((item) => citation(item, context)).join('');
 }
 
 function prepareBibliography(context: Context): void {
   const entries: string[] = [];
+  const cslKeys = new Set<string>();
   for (const file of context.options.cslBibliography ?? []) {
     const path = context.options.assetRoot && !isAbsolute(file) ? resolve(context.options.assetRoot, file) : file;
-    try { entries.push(cslToBiblatex(JSON.parse(readFileSync(path, 'utf8')))); }
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+      for (const item of Array.isArray(parsed) ? parsed : [parsed]) if (item && typeof (item as { id?: unknown }).id === 'string') cslKeys.add(safeLabel((item as { id: string }).id));
+      entries.push(cslToBiblatex(parsed));
+    }
     catch { diagnostic(context, { type: 'citation_definition' }, 'csl-import-degraded', `Could not import CSL JSON resource ${file}.`, 'degraded'); }
   }
   if (context.citations.size === 0 && entries.length === 0 && !context.options.generatedBibliography) return;
   for (const key of context.citations) {
     const definition = context.citationDefinitions.get(key);
+    if (!definition && cslKeys.has(key)) continue;
     if (!definition) {
       if ((context.options.bibliography?.length ?? 0) === 0) {
         diagnostic(context, { type: 'citation' }, 'citation-unresolved', `Citation ${key} needs a definition or bibliography resource.`, 'degraded');
@@ -656,10 +757,10 @@ function prepareBibliography(context: Context): void {
       }
       continue;
     }
-    const values = definition.attrs?.keyValues as Record<string, string> | undefined;
+    const values = attrs(definition) as Record<string, string>;
     const author = bibtex(values?.author ?? 'Unknown'); const year = bibtex(values?.year ?? 'n.d.');
     const note = bibtex(plain(definition));
-    const type = ['article', 'book', 'inproceedings', 'incollection', 'thesis', 'report', 'online', 'misc'].includes(String(values?.type)) ? values!.type : 'misc';
+    const type = ['article', 'book', 'inproceedings', 'incollection', 'thesis', 'report', 'online', 'misc'].includes(String(values.type)) ? values.type : 'misc';
     const fields = { author, year, title: bibtex(values?.title ?? note), journal: bibtex(values?.journal ?? ''), publisher: bibtex(values?.publisher ?? ''), doi: bibtex(values?.doi ?? ''), url: bibtex(values?.url ?? ''), note };
     entries.push(`@${type}{${key},\n${Object.entries(fields).filter(([, value]) => value).map(([name, value]) => `  ${name} = {${value}}`).join(',\n')}\n}`);
   }
@@ -678,6 +779,7 @@ function bibtex(value: string): string { return value.replace(/[{}\\%#]/g, '').r
 
 function diagnostic(context: Context, node: AstNode, code: string, message: string, fidelity: PublishingDiagnostic['fidelity']): void {
   const pos = node.pos as { file?: string; startLine?: number; startColumn?: number; startOffset?: number } | undefined;
+  // `startOffset` counts UTF-8 bytes in 0.2 (C2-A positions).
   const start = typeof pos?.startLine === 'number'
     ? { ...(typeof pos.file === 'string' && pos.file ? { file: pos.file } : {}), line: pos.startLine, ...(typeof pos.startColumn === 'number' ? { column: pos.startColumn } : {}), ...(typeof pos.startOffset === 'number' ? { offset: pos.startOffset } : {}) }
     : undefined;

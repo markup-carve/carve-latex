@@ -24,11 +24,11 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm pack --dry-run
-  # `npm ci` installs the lockfile, so the jobs above only ever see one point in
-  # the `^0.1.7` range the manifest declares - and a consumer installing today
-  # gets whatever the range resolves to. This job is the only one that renders
-  # against that. It is a gate, not an advisory: an engine release this repo
-  # cannot render against is this repo's problem before it is a user's.
+  # `npm ci` installs the lockfile; this job resolves the manifest afresh. On
+  # `next2` the manifest pins the engine's `next2` by commit, built from git on
+  # install, so this also proves that build works without the lockfile. It is a
+  # gate, not an advisory: an engine this repo cannot render against is this
+  # repo's problem before it is a user's.
   resolved-range:
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -7,12 +7,13 @@ import { inspectLog, latexPasses, prepareDiagrams, readProject, renderAst, rende
 import { DEFAULT_TEMPLATE } from '../dist/template.js';
 
 const text = (value) => ({ type: 'text', value });
+const cellParagraph = (...children) => ({ type: 'cell_paragraph', children });
 
 test('renders academic front matter, numbered equations, acronyms, and navigation lists', () => {
   const result = renderAst({ type: 'document', children: [
-    { type: 'frontmatter', content: 'title: Paper\nabstract: A concise abstract.\nkeywords: [carve, publishing]\nlistOfFigures: true\nglossaries: true' },
-    { type: 'abbreviation_def', abbr: 'AST', expansion: 'abstract syntax tree' },
-    { type: 'paragraph', children: [{ type: 'abbreviation', abbr: 'AST', expansion: 'abstract syntax tree' }, { type: 'math', display: true, content: 'x^2', attrs: { id: 'energy' } }] },
+    { type: 'frontmatter', format: 'yaml', value: 'title: Paper\nabstract: A concise abstract.\nkeywords: [carve, publishing]\nlistOfFigures: true\nglossaries: true' },
+    { type: 'abbreviation_def', key: 'AST', namespace: 'abbr', expansion: 'abstract syntax tree' },
+    { type: 'paragraph', children: [{ type: 'abbreviation', key: 'AST', namespace: 'abbr', expansion: 'abstract syntax tree' }, { type: 'math', display: true, value: 'x^2', attrs: { id: 'energy' } }] },
   ] });
   assert.match(result.value, /\\begin\{abstract\}A concise abstract\./);
   assert.match(result.value, /\\textbf\{Keywords:\} carve, publishing/);
@@ -23,11 +24,17 @@ test('renders academic front matter, numbered equations, acronyms, and navigatio
 });
 
 test('renders spanning, captioned tables with repeated heads', () => {
-  const result = renderAst({ type: 'document', children: [{ type: 'table', caption: [text('Results')], rowGroups: { headRows: 1, bodies: [{ headRows: 0, bodyRows: 2 }], footRows: 0 }, columns: [{ align: 'left' }, { align: 'right' }], rows: [
-    { type: 'table_row', cells: [{ type: 'table_cell', header: true, children: [text('Head')] }, { type: 'table_cell', header: true, span: 'colspan', children: [] }] },
-    { type: 'table_row', cells: [{ type: 'table_cell', header: false, children: [text('A')] }, { type: 'table_cell', header: false, children: [text('1')] }] },
-    { type: 'table_row', cells: [{ type: 'table_cell', header: false, span: 'rowspan', children: [] }, { type: 'table_cell', header: false, children: [text('2')] }] },
-  ] }] });
+  // T-035: rows sit in head and body groups; the caption is a caption node.
+  const result = renderAst({ type: 'document', children: [{ type: 'table', caption: { type: 'caption', children: [{ type: 'paragraph', children: [text('Results')] }] },
+    columns: [{ type: 'table_column', align: 'left' }, { type: 'table_column', align: 'right' }], children: [
+      { type: 'table_head', children: [
+        { type: 'table_row', children: [{ type: 'table_cell', header: true, children: [cellParagraph(text('Head'))] }, { type: 'table_cell', header: true, span: 'colspan', children: [] }] },
+      ] },
+      { type: 'table_body', children: [
+        { type: 'table_row', children: [{ type: 'table_cell', header: false, children: [cellParagraph(text('A'))] }, { type: 'table_cell', header: false, children: [cellParagraph(text('1'))] }] },
+        { type: 'table_row', children: [{ type: 'table_cell', header: false, span: 'rowspan', children: [] }, { type: 'table_cell', header: false, children: [cellParagraph(text('2'))] }] },
+      ] },
+    ] }] });
   assert.match(result.value, /\\caption\{Results\} \\\\\n\\toprule/);
   assert.match(result.value, /\\multicolumn\{2\}\{l\}\{Head\}/);
   assert.match(result.value, /\\endfirsthead/);
@@ -36,16 +43,18 @@ test('renders spanning, captioned tables with repeated heads', () => {
 });
 
 test('rules a multi-row head once, below its last row', () => {
-  const row = (value, header) => ({ type: 'table_row', cells: [{ type: 'table_cell', header, children: [text(value)] }] });
-  const result = renderAst({ type: 'document', children: [{ type: 'table', rowGroups: { headRows: 2, bodies: [{ headRows: 0, bodyRows: 1 }], footRows: 0 }, rows: [row('H1', true), row('H2', true), row('B', false)] }] });
+  const row = (value, header) => ({ type: 'table_row', children: [{ type: 'table_cell', header, children: [cellParagraph(text(value))] }] });
+  const result = renderAst({ type: 'document', children: [{ type: 'table', columns: [{ type: 'table_column' }], children: [
+    { type: 'table_head', children: [row('H1', true), row('H2', true)] }, { type: 'table_body', children: [row('B', false)] },
+  ] }] });
   assert.match(result.value, /\\toprule\nH1 \\\\\nH2 \\\\ \\midrule\n\\endfirsthead/);
 });
 
 test('emits safe syntax color and richer BibLaTeX fields', () => {
   const result = renderAst({ type: 'document', children: [
-    { type: 'code_block', lang: 'javascript', content: 'const answer = 42;' },
-    { type: 'paragraph', children: [{ type: 'citation', key: 'paper' }] },
-    { type: 'citation_definition', key: 'paper', attrs: { keyValues: { type: 'article', author: 'Ada', year: '2026', title: 'Carve', journal: 'Markup' } }, children: [text('Fallback')] },
+    { type: 'code_block', syntax: 'javascript', value: 'const answer = 42;' },
+    { type: 'paragraph', children: [{ type: 'citation', key: 'paper', namespace: 'citation' }] },
+    { type: 'citation_definition', key: 'paper', namespace: 'citation', attrs: { keyValues: [['type', 'article'], ['author', 'Ada'], ['year', '2026'], ['title', 'Carve'], ['journal', 'Markup']] }, children: [text('Fallback')] },
   ] });
   assert.match(result.value, /\\textcolor\{carvekeyword\}/);
   assert.match(result.value, /@article\{paper/);
@@ -53,7 +62,7 @@ test('emits safe syntax color and richer BibLaTeX fields', () => {
 });
 
 test('exports SARIF, thresholds, and source positions', () => {
-  const result = renderAst({ type: 'document', children: [{ type: 'comment', value: 'x', pos: { startLine: 4, endLine: 4, startColumn: 2 } }] });
+  const result = renderAst({ type: 'document', children: [{ type: 'comment', form: 'block', value: 'x', pos: { startLine: 4, endLine: 4, startColumn: 2 } }] });
   assert.equal(result.report.summary.dropped, 1);
   assert.equal(reportFails(result.report, 'degraded'), true);
   const sarif = reportToSarif(result.report, 'paper.crv');
@@ -75,13 +84,14 @@ test('reports PDF log quality and leaves unsupported diagram source intact', () 
   const quality = inspectLog('LaTeX Warning: Reference `x` undefined\nMissing character: A\nOverfull \\hbox');
   assert.equal(quality.missingReferences.length, 1); assert.equal(quality.missingGlyphs.length, 1); assert.equal(quality.overfullBoxes.length, 1);
   const root = mkdtempSync(join(tmpdir(), 'carve-latex-assets-'));
-  const ast = { type: 'document', children: [{ type: 'code_block', lang: 'unknown', content: 'x' }] };
+  const ast = { type: 'document', children: [{ type: 'code_block', syntax: 'unknown', value: 'x' }] };
   assert.equal(prepareDiagrams(ast, root).children[0].type, 'code_block');
 });
 
-test('a line block keeps the indentation the engine encodes as non-breaking spaces', () => {
+test('a line block keeps its indentation as non-breaking spaces', () => {
   const result = renderCarve('::: |\nflush\n   indented\n:::\n', { standalone: false });
-  assert.match(result.value, /flush\\\\~~~indented/);
+  // 0.2 gives each line its own node (C2-A line_block), so a source line break follows the `\\`.
+  assert.match(result.value, /flush\\\\\n?~~~indented/);
   assert.deepEqual(result.report.diagnostics, []);
 });
 
@@ -126,37 +136,47 @@ test('the book preset pairs its class with the sectioning commands it uses', () 
   assert.match(rendered.value, /\\begin\{document\}\\frontmatter/);
 });
 
-// From Carve SOURCE, not a hand-built node. Citations are Tier-2 and off in the
-// engine by default, so the renderer's cite path was unreachable from a real
-// document while the AST-level tests passed.
+// From Carve SOURCE, not a hand-built node. Citations have no core form in 0.2
+// (C2-I-101): `[@key]` is a mention, and the cite is the `:cite[key]` inline
+// extension (C2-X-058) this package registers. The locator and the mode are
+// attributes.
 test('a cite written in Carve source reaches \\autocite', () => {
-  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nA cite [@key1].\n');
+  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nA cite :cite[key1].\n');
   assert.match(result.value, /\\autocite\{key1\}/);
 });
 
 test('an integral cite written in source reaches \\textcite', () => {
-  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nSee [+@key1].\n');
+  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nSee :cite[key1]{mode="author-in-text"}.\n');
   assert.match(result.value, /\\textcite\{key1\}/);
 });
 
 test('an author-suppressed cite written in source reaches \\autocite*', () => {
-  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nSee [-@key1].\n');
+  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nSee :cite[key1]{mode="suppress-author"}.\n');
   assert.match(result.value, /\\autocite\*\{key1\}/);
 });
 
 test('a cite against a declared bibliography needs no generated entry', () => {
-  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nA cite [@key1].\n');
+  const result = renderCarve('---yaml\ntitle: T\nbibliography: [refs.bib]\n---\n\nA cite :cite[key1].\n');
   assert.doesNotMatch(result.value, /carve-generated\.bib/);
 });
 
+// C2-X-058: definitions are the description-list entries of a bibliography directive.
+const BIBLIOGRAPHY = '::: bibliography\n:: key1\n: Ada Example. A Title. 2026.\n:::\n';
+
 test('a source bibliography definition becomes a resolvable BibLaTeX entry', () => {
-  const result = renderCarve('A cite [@key1].\n\n[@key1]: Ada Example. A Title. 2026.\n');
+  const result = renderCarve(`A cite :cite[key1].\n\n${BIBLIOGRAPHY}`);
   assert.match(result.value, /@misc\{key1,/);
+  assert.match(result.value, /note = \{Ada Example\. A Title\. 2026\.\}/);
+});
+
+test('a locator attribute reaches the citation postnote', () => {
+  const result = renderCarve('See :cite[key1]{locator="p. 4"}.\n', { standalone: false, bibliography: ['refs.bib'] });
+  assert.match(result.value, /\\autocite\[p\. 4\]\{key1\}/);
 });
 
 test('a cite in a project chapter reaches \\autocite too', () => {
   const root = mkdtempSync(join(tmpdir(), 'carve-latex-cite-'));
-  writeFileSync(join(root, 'one.crv'), 'A cite [@key1].\n\n[@key1]: Ada Example. A Title. 2026.\n');
+  writeFileSync(join(root, 'one.crv'), `A cite :cite[key1].\n\n${BIBLIOGRAPHY}`);
   writeFileSync(join(root, 'book.yml'), 'version: 1\nchapters: [one.crv]\n');
   const result = renderAst(readProject(join(root, 'book.yml')).document);
   assert.match(result.value, /\\autocite\{key1\}/);
@@ -171,7 +191,8 @@ test('an auto-numbered figure caption drops the authored label', () => {
 });
 
 test('an auto-numbered table caption drops the authored label', () => {
-  const result = renderCarve('| a |\n|---|\n| 1 |\n^ Table #: Results\n', { standalone: false });
+  // C2-B-166: a Markdown separator row is a body row in 0.2, so the head is written with `|=`.
+  const result = renderCarve('|= a |\n| 1 |\n^ Table #: Results\n', { standalone: false });
   assert.match(result.value, /\\caption\{Results\} \\\\\n\\toprule/);
 });
 
@@ -240,9 +261,12 @@ test('a title a structural container cannot carry is reported, not dropped in si
   assert.equal(result.report.diagnostics[0].code, 'admonition-title-dropped');
 });
 
-test('an unrecognized kind still falls back to remark and says so', () => {
+// C2-B-127: only the eight notice names give an admonition in 0.2; another name
+// is a plain div, which prints its body without a wrapper and says so.
+test('an unrecognized kind is a div, flattened and reported', () => {
   const result = renderCarve('::: sidebar\nbody\n:::\n', { standalone: false });
-  assert.equal(result.report.diagnostics[0].code, 'admonition-normalized');
+  assert.equal(result.report.diagnostics[0].code, 'container-flattened');
+  assert.match(result.value, /^body$/m);
 });
 
 test('every shipped template declares the notice environments the renderer emits', () => {
