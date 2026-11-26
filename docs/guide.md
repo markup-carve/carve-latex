@@ -103,6 +103,7 @@ Definitions go in a `bibliography` or `references` directive as a description li
 - figures, subfigure groups, short captions, placement, sizing, and tagged-PDF alternative text
 - multipage tables with captions, widths, repeated heads, and row/column spans; a head-row cell's alignment (`|={>} Price |`) sets its column, and a body cell's (`|{<} 12 |`) applies to that cell alone
 - ordered, unordered, task and definition lists
+- page breaks: a thematic break with the class `page-break` (`{.page-break}` on the line above `***`) writes `\clearpage` instead of a rule
 - injection-safe syntax-highlighted code blocks with compact language labels
 - CSV and TSV fences color every field (value, quoted string, separator) and bold the header record, including doubled quotes
 - footnotes and inline footnotes
