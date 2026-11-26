@@ -25,7 +25,7 @@ jobs:
       - run: npm test
       - run: npm pack --dry-run
   # `npm ci` installs the lockfile; this job resolves the manifest afresh. On
-  # `next2` the manifest pins the engine's `next2` by commit, built from git on
+  # `main` the manifest pins the engine's `main` by commit, built from git on
   # install, so this also proves that build works without the lockfile. It is a
   # gate, not an advisory: an engine this repo cannot render against is this
   # repo's problem before it is a user's.
