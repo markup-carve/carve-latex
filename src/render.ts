@@ -190,7 +190,7 @@ function renderBlock(node: AstNode, context: Context): string {
     case 'div': return div(node, context);
     case 'line_block': return environment('verse', (node.children ?? []).filter((line) => line.type === 'line').map((line) => renderLine(line, context)).join('\\\\\n'));
     case 'raw_block': return raw(node, context, true);
-    case 'thematic_break': return '\\par\\noindent\\rule{\\linewidth}{0.4pt}\\par';
+    case 'thematic_break': return classes(node).includes('page-break') ? '\\clearpage' : '\\par\\noindent\\rule{\\linewidth}{0.4pt}\\par';
     case 'comment': diagnostic(context, node, 'comment-dropped', 'Comments are not printed.', 'dropped'); return '';
     case 'directive': return directive(node, context);
     case 'block_extension': return blockExtension(node, context);

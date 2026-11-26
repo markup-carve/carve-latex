@@ -103,6 +103,15 @@ test('parses Carve through the canonical engine', () => {
   assert.match(result.value, /\\emph\{careful\}/);
 });
 
+// carve#6793: `{.page-break}` on `***` is the page-break convention.
+test('a page-break thematic break is a page break, other breaks stay rules', () => {
+  const result = renderCarve('Page one.\n\n{.page-break}\n***\n\nPage two.\n\n***\n\nEnd.\n', { standalone: false });
+  assert.equal(result.value.match(/\\clearpage/g)?.length, 1);
+  assert.equal(result.value.match(/\\rule\{\\linewidth\}/g)?.length, 1);
+  assert.ok(result.value.indexOf('\\clearpage') < result.value.indexOf('\\rule'));
+  assert.deepEqual(result.report.diagnostics, []);
+});
+
 // From SOURCE, so the field names come from the engine rather than from this
 // file. U-069 respells the 0.1 substitution arrow as a deletion and an
 // insertion, which is what the engine parses (T-043).
