@@ -44,7 +44,8 @@ test('refuses a target above the project root and leaves the directive literal',
   const result = readProject(join(root, 'book.yml'));
   assert.deepEqual(paragraphs(result.document), ['{{ ../escape.crv }}']);
   assert.equal(result.includeWarnings.length, 1);
-  assert.equal(result.includeWarnings[0].rule, 'include-unresolved');
+  // C2-N-012, C2-N-013: the parse names the cause; outside the root is reported whether or not the target exists.
+  assert.equal(result.includeWarnings[0].rule, 'include-outside-root');
 });
 
 test('refuses a symlink that points out of the project root', () => {
@@ -54,7 +55,8 @@ test('refuses a symlink that points out of the project root', () => {
   symlinkSync(join(outside, 'secret.crv'), join(root, 'escape.crv'));
   const result = readProject(join(root, 'book.yml'));
   assert.deepEqual(paragraphs(result.document), ['{{ escape.crv }}']);
-  assert.equal(result.includeWarnings[0].rule, 'include-unresolved');
+  // C2-N-012: the canonical form, every symbolic link resolved, lies outside the root.
+  assert.equal(result.includeWarnings[0].rule, 'include-outside-root');
 });
 
 test('breaks a cycle between two included files', () => {
@@ -64,11 +66,11 @@ test('breaks a cycle between two included files', () => {
 });
 
 test('a refused target is reported by the path the directive wrote, not by a host path', () => {
-  // I7: the engine folds "outside the root" and "not found" into one class so
-  // a host path cannot be read back out of the message.
+  // C2-N-013: 0.2 names "not found" apart from "outside the root", and the
+  // containment test comes first, so the cause never reveals a host path.
   const root = project({ 'one.crv': '{{ missing.crv }}\n' });
   const [warning] = readProject(join(root, 'book.yml')).includeWarnings;
-  assert.equal(warning.rule, 'include-unresolved');
+  assert.equal(warning.rule, 'include-not-found');
   assert.match(warning.message, /missing\.crv/);
   assert.equal(warning.message.includes(tmpdir()), false);
 });

@@ -3,9 +3,9 @@ import type { AstNode, PublishOptions } from './types.js';
 
 export function readMetadata(document: AstNode): Record<string, unknown> {
   const frontmatter = document.children?.find((node) => node.type === 'frontmatter');
-  if (!frontmatter || typeof frontmatter.content !== 'string') return {};
+  if (!frontmatter || typeof (frontmatter.value ?? frontmatter.content) !== 'string') return {};
   try {
-    const value = parseYaml(frontmatter.content);
+    const value = parseYaml(String(frontmatter.value ?? frontmatter.content));
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   } catch {
     return {};

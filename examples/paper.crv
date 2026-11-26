@@ -1,4 +1,4 @@
----yaml
+---
 title: Reproducible Carve Publishing
 author: Ada Example
 date: 2026-09-14
@@ -7,12 +7,12 @@ bibliography: [references.bib]
 tableOfContents: true
 ---
 
-# Introduction
+= Introduction
 
 Carve keeps the authoring source readable while `carve-latex` owns publication typography
-[@carve2026], which a second cite states integrally as [+@carve2026].
+:cite[carve2026], which a second cite states integrally as :cite[carve2026]{mode=author-in-text}.
 
-## A theorem
+== A theorem
 
 ::: theorem
 Every supported structural node is translated from the canonical AST rather than reparsed from HTML.
@@ -50,7 +50,7 @@ And this one.
 And this one.
 :::
 
-## Data
+== Data
 
 |= Measure |={>} Result |
 | Fidelity | 100 |

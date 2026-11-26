@@ -7,14 +7,26 @@ import * as templateModule from '../dist/template.js';
 
 const text = (value) => ({ type: 'text', value });
 const paragraph = (...children) => ({ type: 'paragraph', children });
+const cellParagraph = (...children) => ({ type: 'cell_paragraph', children });
+// AST contract 2.0 (T-035): rows sit in head, body and foot groups, a leading
+// run of all-header rows forms the head as the engine groups it.
+const tableNode = (rows, extra = {}) => {
+  let head = 0;
+  while (head < rows.length && rows[head].length > 0 && rows[head].every((cell) => cell.header === true || cell.span !== undefined) && rows[head].some((cell) => cell.header === true)) head += 1;
+  const row = (cells) => ({ type: 'table_row', children: cells.map((cell) => ({ header: false, ...cell })) });
+  const groups = [];
+  if (head > 0) groups.push({ type: 'table_head', children: rows.slice(0, head).map(row) });
+  if (head < rows.length) groups.push({ type: 'table_body', children: rows.slice(head).map(row) });
+  return { type: 'table', columns: [], children: groups, ...extra };
+};
 
 test('renders a complete publication document', () => {
   const result = renderAst({ type: 'document', children: [
-    { type: 'frontmatter', format: 'yaml', content: 'title: A Study\nauthor: Ada\nlang: en\ntableOfContents: true' },
-    { type: 'heading', level: 1, id: 'intro', children: [text('Introduction')] },
+    { type: 'frontmatter', format: 'yaml', value: 'title: A Study\nauthor: Ada\nlang: en\ntableOfContents: true' },
+    { type: 'heading', level: 1, attrs: { id: 'intro' }, children: [text('Introduction')] },
     paragraph(text('Use '), { type: 'emphasis', children: [text('structure')] }, text(' and '), { type: 'strong', children: [text('meaning')] }, text('.')),
-    { type: 'list', ordered: true, start: 3, items: [{ type: 'list_item', children: [paragraph(text('Third'))] }] },
-    { type: 'code_block', lang: 'Rust', value: 'fn main() {}' },
+    { type: 'list', marker: { kind: 'ordered', start: 3 }, spacing: 'tight', children: [{ type: 'list_item', children: [paragraph(text('Third'))] }] },
+    { type: 'code_block', syntax: 'Rust', value: 'fn main() {}' },
   ] });
   assert.match(result.value, /\\documentclass\[a4paper\]\{article\}/);
   assert.match(result.value, /\\title\{ A Study \}/);
@@ -31,14 +43,15 @@ test('renders a complete publication document', () => {
 
 test('supports publication constructs and reports losses', () => {
   const result = renderAst({ type: 'document', children: [
-    { type: 'admonition', kind: 'theorem', children: [paragraph(text('True.'))] },
-    { type: 'table', rows: [
-      { type: 'table_row', cells: [{ type: 'table_cell', header: true, children: [text('A')] }, { type: 'table_cell', header: true, align: 'right', children: [text('B')] }] },
-      { type: 'table_row', cells: [{ type: 'table_cell', children: [text('1')] }, { type: 'table_cell', children: [text('2')] }] },
-    ] },
+    // 0.2 admonitions are the eight notice kinds; a theorem is a div with that class.
+    { type: 'div', attrs: { classes: ['theorem'] }, children: [paragraph(text('True.'))] },
+    tableNode([
+      [{ type: 'table_cell', header: true, children: [cellParagraph(text('A'))] }, { type: 'table_cell', header: true, align: 'right', children: [cellParagraph(text('B'))] }],
+      [{ type: 'table_cell', children: [cellParagraph(text('1'))] }, { type: 'table_cell', children: [cellParagraph(text('2'))] }],
+    ]),
     paragraph({ type: 'link', href: 'https://example.com?a=1&b=2', children: [text('Link')] }),
     { type: 'raw_block', format: 'html', value: '<aside>note</aside>' },
-    { type: 'comment', value: 'private' },
+    { type: 'comment', form: 'block', value: 'private' },
   ] });
   assert.match(result.value, /\\begin\{theorem\}/);
   assert.match(result.value, /\\begin\{longtable\}\{lr\}/);
@@ -48,8 +61,8 @@ test('supports publication constructs and reports losses', () => {
 
 test('resolves footnotes and emits citations', () => {
   const result = renderAst({ type: 'document', children: [
-    paragraph(text('Evidence'), { type: 'footnote_ref', label: 'n' }, text(' '), { type: 'citation', key: 'doe2026' }),
-    { type: 'footnote', label: 'n', children: [paragraph(text('A note.'))] },
+    paragraph(text('Evidence'), { type: 'footnote_ref', key: 'n', namespace: 'footnote' }, text(' '), { type: 'citation', key: 'doe2026', namespace: 'citation' }),
+    { type: 'footnote', key: 'n', namespace: 'footnote', children: [paragraph(text('A note.'))] },
   ] }, { bibliography: ['refs.bib'] });
   assert.match(result.value, /\\footnote\{A note\.\}/);
   assert.match(result.value, /\\autocite\{doe2026\}/);
@@ -59,8 +72,9 @@ test('resolves footnotes and emits citations', () => {
 
 test('turns Carve citation definitions into a self-contained BibLaTeX resource', () => {
   const result = renderAst({ type: 'document', children: [
-    paragraph({ type: 'citation_group', mode: 'integral', items: [{ type: 'citation', key: 'carve2026', suppressAuthor: false }] }),
-    { type: 'citation_definition', key: 'carve2026', attrs: { keyValues: { author: 'Carve Authors', year: '2026' } }, children: [text('Carve language')] },
+    // T-020, T-021: each citation carries its own mode, and keyValues are pairs (C2-A-032).
+    paragraph({ type: 'citation_group', raw: '', children: [{ type: 'citation', key: 'carve2026', namespace: 'citation', mode: 'author-in-text' }] }),
+    { type: 'citation_definition', key: 'carve2026', namespace: 'citation', attrs: { keyValues: [['author', 'Carve Authors'], ['year', '2026']] }, children: [text('Carve language')] },
   ] });
   assert.match(result.value, /\\textcite\{carve2026\}/);
   assert.match(result.value, /\\begin\{filecontents\*\}\[overwrite\]\{carve-generated\.bib\}/);
@@ -89,26 +103,37 @@ test('parses Carve through the canonical engine', () => {
   assert.match(result.value, /\\emph\{careful\}/);
 });
 
+// carve#6793: `{.page-break}` on `***` is the page-break convention.
+test('a page-break thematic break is a page break, other breaks stay rules', () => {
+  const result = renderCarve('Page one.\n\n{.page-break}\n***\n\nPage two.\n\n***\n\nEnd.\n', { standalone: false });
+  assert.equal(result.value.match(/\\clearpage/g)?.length, 1);
+  assert.equal(result.value.match(/\\rule\{\\linewidth\}/g)?.length, 1);
+  assert.ok(result.value.indexOf('\\clearpage') < result.value.indexOf('\\rule'));
+  assert.deepEqual(result.report.diagnostics, []);
+});
+
 // From SOURCE, so the field names come from the engine rather than from this
-// file. Read by hand they were `oldText` and `newText`, which the engine has
-// never published, and the arm returned an empty string with no diagnostic.
+// file. U-069 respells the 0.1 substitution arrow as a deletion and an
+// insertion, which is what the engine parses (T-043).
 test('keeps both halves of a substitution the engine parsed', () => {
-  const result = renderCarve('A {~/old/~>*new*~} run.\n', { standalone: false });
+  const result = renderCarve('A {-/old/-}{+*new*+} run.\n', { standalone: false });
   assert.match(result.value, /\\sout\{\\emph\{old\}\}\\uline\{\\textbf\{new\}\}/);
   assert.deepEqual(result.report.diagnostics, []);
 });
 
 test('renders structured AST fields without losing authored content', () => {
   const result = renderAst({ type: 'document', children: [
-    paragraph({ type: 'inline_footnote', inline: [text('Inline note')] }, text(' '),
-      { type: 'abbreviation', abbr: 'AST', expansion: 'abstract syntax tree' }, text(' '),
-      { type: 'substitution', old: [text('was')], new: [{ type: 'emphasis', children: [text('is')] }] }, text(' '),
-      { type: 'substitution', old: [], new: [text('added')] }),
-    { type: 'definition_list', items: [
+    paragraph({ type: 'inline_footnote', children: [text('Inline note')] }, text(' '),
+      { type: 'abbreviation', key: 'AST', namespace: 'abbr', expansion: 'abstract syntax tree' }, text(' '),
+      // T-043: a substitution is a delete followed by an insert.
+      { type: 'delete', children: [text('was')] }, { type: 'insert', children: [{ type: 'emphasis', children: [text('is')] }] }, text(' '),
+      { type: 'insert', children: [text('added')] }),
+    { type: 'definition_list', children: [
       { type: 'definition_term', children: [text('Term')] },
       { type: 'definition_description', children: [paragraph(text('Meaning'))] },
     ] },
-    { type: 'figure', target: { type: 'image', src: 'plot.pdf', alt: 'Plot' }, caption: [text('Result')] },
+    // 0.2 has no figure node: the caption belongs to the image paragraph.
+    { type: 'paragraph', role: 'image', children: [{ type: 'image', src: 'plot.pdf', alt: 'Plot' }], caption: { type: 'caption', children: [paragraph(text('Result'))] } },
   ] });
   assert.match(result.value, /\\footnote\{Inline note\}/);
   assert.match(result.value, /\\textsc\{AST\}/);
@@ -130,19 +155,19 @@ test('a code payload that carries its terminating newline gains no trailing para
   };
   const breaks = (node) => (codeEnvironment(node).match(/\\par\n/g) ?? []).length;
 
-  // carve 0.1.8+ puts the payload's final newline in `content`. The nodes are
+  // The payload's final newline is part of `value`. The nodes are
   // built here rather than parsed, so the assertions hold on either contract.
-  assert.equal(breaks({ type: 'code_block', lang: 'js', content: 'const a = 1;\nconst b = 2;\n' }), 1);
+  assert.equal(breaks({ type: 'code_block', syntax: 'js', value: 'const a = 1;\nconst b = 2;\n' }), 1);
   // The unhighlighted path encodes the newline itself, so it needs its own case.
-  assert.equal(breaks({ type: 'code_block', lang: 'unsupported-lang', content: 'one\ntwo\n' }), 1);
+  assert.equal(breaks({ type: 'code_block', syntax: 'unsupported-lang', value: 'one\ntwo\n' }), 1);
   // An authored blank final line is payload, not the contract's terminator, so
   // it still separates from the payload that has no blank line at all.
-  assert.equal(breaks({ type: 'code_block', lang: 'js', content: 'a\n' }), 0);
-  assert.equal(breaks({ type: 'code_block', lang: 'js', content: 'a\n\n' }), 1);
+  assert.equal(breaks({ type: 'code_block', syntax: 'js', value: 'a\n' }), 0);
+  assert.equal(breaks({ type: 'code_block', syntax: 'js', value: 'a\n\n' }), 1);
   // A payload with no terminator (pre-0.1.8, or a hand-built node) is unchanged,
   // and an empty one must not lose a byte it never had.
-  assert.equal(breaks({ type: 'code_block', lang: 'js', content: 'const a = 1;' }), 0);
-  assert.equal(codeEnvironment({ type: 'code_block', content: '' }), '');
+  assert.equal(breaks({ type: 'code_block', syntax: 'js', value: 'const a = 1;' }), 0);
+  assert.equal(codeEnvironment({ type: 'code_block', value: '' }), '');
 });
 
 // From SOURCE, so the payload shape comes from whichever engine is installed
@@ -158,12 +183,13 @@ test('a parsed code block emits one line per payload line', () => {
   };
   assert.equal((environment('``` js\nconst a = 1;\n```\n').match(/\\par\n/g) ?? []).length, 0);
   assert.equal((environment('``` js\nconst a = 1;\nconst b = 2;\n```\n').match(/\\par\n/g) ?? []).length, 1);
-  assert.equal((environment('~~~\nplain\n~~~\n').match(/\\par\n/g) ?? []).length, 0);
+  // U-116: a tilde fence is text in 0.2, so the backtick fence stands in for it.
+  assert.equal((environment('```\nplain\n```\n').match(/\\par\n/g) ?? []).length, 0);
 });
 
 test('CSV and TSV fences highlight delimited fields', () => {
   const body = (language, value) => {
-    const rendered = renderAst({ type: 'document', children: [{ type: 'code_block', lang: language, value }] }, { standalone: false }).value;
+    const rendered = renderAst({ type: 'document', children: [{ type: 'code_block', syntax: language, value }] }, { standalone: false }).value;
     const found = rendered.match(/\\begin\{carvecode\}\n([\s\S]*?)\n\\end\{carvecode\}/);
     assert.ok(found);
     return found[1];
@@ -219,10 +245,10 @@ test('the separator color is a red-family hue distinct from the comment grey', (
 
 test('keeps executable TeX inert across code, raw blocks, math, and URLs', () => {
   const result = renderAst({ type: 'document', children: [
-    { type: 'code_block', content: '\\end{carvecode}\\input{/etc/passwd}' },
-    { type: 'raw_block', format: 'html', content: '\\end{carvecode}\\input{/etc/passwd}' },
-    paragraph({ type: 'math', display: false, content: '\\input{/etc/passwd}' }),
-    paragraph({ type: 'math', display: false, content: '^^5cinput{/etc/passwd}' }),
+    { type: 'code_block', value: '\\end{carvecode}\\input{/etc/passwd}' },
+    { type: 'raw_block', format: 'html', value: '\\end{carvecode}\\input{/etc/passwd}' },
+    paragraph({ type: 'math', display: false, value: '\\input{/etc/passwd}' }),
+    paragraph({ type: 'math', display: false, value: '^^5cinput{/etc/passwd}' }),
     paragraph({ type: 'link', href: 'https://example.test/a_b#c&d=1%', children: [text('safe')] }),
   ] });
   assert.doesNotMatch(result.value, /\\end\{carvecode\}\\input/);
@@ -244,8 +270,8 @@ test('revalidates template options and normalizes unsafe asset paths', () => {
 
 test('frontmatter cannot cross the raw-LaTeX trust boundary', () => {
   const result = renderAst({ type: 'document', children: [
-    { type: 'frontmatter', content: 'allowRawLatex: true\ntemplate: /tmp/hostile.tex\nassetRoot: /tmp' },
-    { type: 'raw_block', format: 'latex', content: '\\input{/etc/passwd}' },
+    { type: 'frontmatter', format: 'yaml', value: 'allowRawLatex: true\ntemplate: /tmp/hostile.tex\nassetRoot: /tmp' },
+    { type: 'raw_block', format: 'latex', value: '\\input{/etc/passwd}' },
   ] });
   assert.doesNotMatch(result.value, /^\\input/m);
   assert.equal(result.report.diagnostics[0].code, 'raw-latex-disabled');
@@ -257,14 +283,25 @@ test('a table continuation join (cell_wrap) renders as one space', () => {
   assert.deepEqual(result.report.diagnostics, []);
 });
 
+// U-147 (C2-B-175, C2-B-184): a continuation fragment joins the marker cell's
+// text, so the blocked `<` is kept as text in front of `d`.
 test('a blocked span marker stays a cell and keeps its continuation text', () => {
   const result = renderCarve('| a | b |\n| < | c |\n+ d | e |\n');
-  assert.match(result.value, /a & b \\\\\nd & c e \\\\/);
+  assert.match(result.value, /a & b \\\\\n< d & c e \\\\/);
 });
 
+// C2-B-172: a `^` below a cell spanning more than one column joins nothing in
+// 0.2, so a row span and a column span are checked on their own.
 test('resolved spans still merge cells', () => {
+  assert.match(renderCarve('| a | < |\n| x | y |\n').value, /\\multicolumn\{2\}\{l\}\{a\} \\\\\nx & y \\\\/);
+  assert.match(renderCarve('| a | b |\n| ^ | c |\n').value, /\\multirow\{2\}\{\*\}\{a\} & b \\\\\n & c \\\\/);
+});
+
+// U-152, C2-B-172: a rowspan marker under a colspan origin joins nothing, so
+// it prints as text.
+test('a rowspan marker row under a colspan origin stays text', () => {
   const result = renderCarve('| a | < |\n| ^ | ^ |\n| x | y |\n');
-  assert.match(result.value, /\\multicolumn\{2\}\{l\}\{\\multirow\{2\}\{\*\}\{a\}\} \\\\\n &  \\\\\nx & y \\\\/);
+  assert.match(result.value, /\\multicolumn\{2\}\{l\}\{a\} \\\\\n\\textasciicircum\{\} & \\textasciicircum\{\} \\\\/);
 });
 
 const codes = (result) => result.report.diagnostics.map((item) => item.code);
@@ -291,12 +328,12 @@ test('a generated-content placement renders the blocks written inside it', () =>
 test('a block extension renders its fallback, or reports the loss as a block', () => {
   const paragraph = { type: 'paragraph', children: [{ type: 'text', value: 'Fallback text.' }] };
   const withFallback = renderAst({ type: 'document', children: [
-    { type: 'block_extension', name: 'chart', payload: { format: 'json', value: '{}' }, fallback: paragraph },
+    { type: 'block_extension', name: 'chart', version: '1', children: [], payload: [{ format: 'json', value: '{}' }], fallback: [paragraph] },
   ] }, { standalone: false });
   assert.match(withFallback.value, /Fallback text\./);
   assert.deepEqual(codes(withFallback), ['block-extension-fallback-rendered']);
   const bare = renderAst({ type: 'document', children: [
-    { type: 'block_extension', name: 'chart', payload: { format: 'json', value: '{"a":1}' } },
+    { type: 'block_extension', name: 'chart', version: '1', children: [], payload: [{ format: 'json', value: '{"a":1}' }], fallback: [] },
   ] }, { standalone: false });
   assert.match(bare.value, /\\begin\{carvecode\}/);
   assert.deepEqual(codes(bare), ['block-extension-degraded']);
@@ -326,7 +363,7 @@ test('a ruby pair with an empty annotation prints its base alone', () => {
 });
 
 const cell = (value, extra = {}) => ({ type: 'table_cell', children: value === undefined ? [] : [text(value)], ...extra });
-const tableOf = (rows, extra = {}) => renderAst({ type: 'document', children: [{ type: 'table', rows: rows.map((cells) => ({ type: 'table_row', cells })), ...extra }] }).value;
+const tableOf = (rows, extra = {}) => renderAst({ type: 'document', children: [tableNode(rows.map((cells) => cells.map((item) => ({ ...item, children: item.children.map((child) => cellParagraph(child)) }))), extra)] }).value;
 
 test('a body cell alignment applies to that cell only', () => {
   const value = tableOf([
@@ -378,8 +415,11 @@ test('braced cell alignment sets the head-row column default and a body cell loc
   assert.match(result.value, /\nTea & 3 \\\\\n\\multicolumn\{1\}\{c\}\{Cake\} & \\multicolumn\{1\}\{l\}\{12\} \\\\/);
 });
 
-test('the deprecated glued header marker still reads as the braced one', () => {
-  assert.equal(renderCarve('|= a |=> b |\n| x | 1 |\n').value, renderCarve('|= a |={>} b |\n| x | 1 |\n').value);
+// U-056: 0.2 reads the glued `|=>` as a header cell whose text opens with `>`;
+// only the braced spelling aligns.
+test('the deprecated glued header marker is text, the braced one aligns', () => {
+  assert.match(renderCarve('|= a |=> b |\n| x | 1 |\n').value, /\\begin\{longtable\}\{ll\}/);
+  assert.match(renderCarve('|= a |={>} b |\n| x | 1 |\n').value, /\\begin\{longtable\}\{lr\}/);
 });
 
 test('an erased comment line folds the paragraphs around it into one', () => {
