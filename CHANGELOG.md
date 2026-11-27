@@ -4,12 +4,18 @@ Notable changes to `@markup-carve/carve-latex`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-27
+
 ### Breaking
 
-- Ported to Carve 0.2: the renderer reads the 0.2 tree (AST contract 2.0), and `readAst()` and `--from-json` refuse a 0.1 tree. The engine is `@markup-carve/carve` `next2`, pinned by commit.
-- Citations are written `:cite[key]` with `locator`, `prefix`, `suffix` and `mode` attributes, and their definitions sit in a `::: bibliography` description list; `[@key]` is a mention in 0.2. `carveExtensions()` returns the `:cite` matcher (`citeExtension`).
-- `::: theorem` and the other non-notice names are divs: an unknown name is flattened and reported as `container-flattened` instead of becoming a remark.
-- Include warnings use the engine's codes `include-outside-root`, `include-not-found` and `include-cycle`.
+- Ported to Carve 0.2: the renderer reads the 0.2 tree (AST contract 2.0), and `readAst()` and `--from-json` refuse a 0.1 tree. It requires `@markup-carve/carve` 0.2 (#45).
+- Citations are written `:cite[key]` with `locator`, `prefix`, `suffix` and `mode` attributes, and their definitions sit in a `::: bibliography` description list; `[@key]` is a mention in 0.2. `carveExtensions()` returns the `:cite` matcher (`citeExtension`) (#45).
+- `::: theorem` and the other non-notice names are divs: an unknown name is flattened and reported as `container-flattened` instead of becoming a remark (#45).
+- Include warnings use the engine's codes `include-outside-root`, `include-not-found` and `include-cycle` (#45).
+
+### Added
+
+- A thematic break with `{.page-break}` starts a new page (`\clearpage`) and draws no rule (#50).
 
 ## [0.1.4] - 2026-11-12
 
